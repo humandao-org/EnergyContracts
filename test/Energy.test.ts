@@ -3,13 +3,14 @@ import { expect } from "chai";
 import { Energy, IERC20 } from "../typechain-types";
 import { ethers, network } from "hardhat";
 import { Contract } from "ethers";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
 let energyContract: Energy;
 let usdcContract: IERC20;
 let usdtContract: IERC20;
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
-const USDC_ADDRESS = '0x2791bca1f2de4661ed88a30c99a7a9449aa84174';
-const USDT_ADDRESS = '0xc2132d05d31c914a87c6611c10748aeb04b58e8f';
+const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
 const fixedExchangeRates = [
     { address: USDC_ADDRESS, amount: 4 },
     { address: USDT_ADDRESS, amount: 2 }];
@@ -47,10 +48,14 @@ describe("Energy Token", function () {
         return { energyContract, owner, alice, bob };
     }
  
-    async function approveStablecoin(amount: bigint, paymentToken: IERC20): Promise<bigint> {
+    async function approvePaymentToken(amount: bigint, paymentToken: IERC20, account?: HardhatEthersSigner): Promise<bigint> {
         const exchangeRate = await energyContract.fixedExchangeRate(await paymentToken.getAddress());
         const price = amount * BigInt(exchangeRate)
-        await usdcContract.approve(await energyContract.getAddress(), price)
+        if(!account) {
+            const [owner] = await ethers.getSigners();
+            account = owner;
+        }
+        await paymentToken.connect(account).approve(await energyContract.getAddress(), price)
         return price
     }
 
@@ -104,8 +109,10 @@ describe("Energy Token", function () {
 
             const amount = BigInt(100);
             expect(await usdcContract.balanceOf(energyContract)).to.be.equal(0);
-            const price = await approveStablecoin(amount, usdcContract);
-            await energyContract.mint(owner.address, amount, USDC_ADDRESS);
+            const price = await approvePaymentToken(amount, usdcContract);
+            await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS))
+                .to.emit(energyContract, "Mint")
+                .withArgs(owner.address, amount, USDC_ADDRESS, price);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
 
             await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "Underpaid()")
@@ -117,7 +124,7 @@ describe("Energy Token", function () {
             const { energyContract, owner } = await loadFixture(deployFixture);
 
             const amount = BigInt(100);
-            await approveStablecoin(amount, usdcContract);
+            await approvePaymentToken(amount, usdcContract);
             await energyContract.pause();
             await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWith("Pausable: paused");
 
@@ -129,31 +136,82 @@ describe("Energy Token", function () {
 
     describe("Burning", () => {
         it("Should be able to burn", async () => {
-            const { energyContract, owner } = await loadFixture(deployFixture);
+            const { energyContract, owner, alice } = await loadFixture(deployFixture);
 
             const amount = BigInt(100);
-            await approveStablecoin(amount, usdcContract);
+            const price = await approvePaymentToken(amount, usdcContract);
             await energyContract.mint(owner.address, amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-            await energyContract.burn(amount);
+            expect(await usdcContract.balanceOf(energyContract)).to.be.equal(price);
+
+            const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
+            await expect(energyContract.burn(amount, USDC_ADDRESS))
+                .to.emit(energyContract, "Burn")
+                .withArgs(owner.address, amount, USDC_ADDRESS, price);
+
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(0);
+            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(ownerUsdcBefore+price);
+        });
+
+        it("Should be able to burn and get a different payment token", async () => {
+            const { energyContract, owner, alice } = await loadFixture(deployFixture);
+
+            const amountOwner = BigInt(400);
+            const amountAlice = amountOwner/BigInt(4);
+
+            const priceUSDT = await approvePaymentToken(amountOwner, usdtContract);
+            await energyContract.mint(owner.address, amountOwner, USDT_ADDRESS);
+
+            const priceUSDC = await approvePaymentToken(amountAlice, usdcContract, alice);
+            await energyContract.connect(alice).mint(alice.address, amountAlice, USDC_ADDRESS);
+
+            const ownerUsdtBefore = await usdtContract.balanceOf(owner.address);
+            const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
+            const aliceUsdtBefore = await usdtContract.balanceOf(alice.address);
+            const aliceUsdcBefore = await usdcContract.balanceOf(alice.address);
+            await expect(energyContract.connect(alice).burn(amountAlice, USDT_ADDRESS))
+                .to.emit(energyContract, "Burn")
+                .withArgs(alice.address, amountAlice, USDT_ADDRESS, priceUSDT/BigInt(4));
+
+            expect(await energyContract.balanceOf(alice.address)).to.be.equal(0);
+            expect(await usdtContract.balanceOf(alice.address)).to.be.equal(aliceUsdtBefore+priceUSDT/BigInt(4));
+            expect(await usdcContract.balanceOf(alice.address)).to.be.equal(aliceUsdcBefore);
+
+            // Owner still have the same balances (after his mint and alice burn)
+            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amountOwner);
+            expect(await usdtContract.balanceOf(owner.address)).to.be.equal(ownerUsdtBefore);
+            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(ownerUsdcBefore);
         });
 
         it("Should not be able to burn if paused", async () => {
             const { energyContract, owner } = await loadFixture(deployFixture);
 
             const amount = BigInt(100);
-            await approveStablecoin(amount, usdcContract);
+            const price = await approvePaymentToken(amount, usdcContract);
 
             await energyContract.mint(owner.address, amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
 
             await energyContract.pause();
-            await expect(energyContract.burn(amount)).to.be.revertedWith("Pausable: paused");
+            await expect(energyContract.burn(amount, USDC_ADDRESS)).to.be.revertedWith("Pausable: paused");
 
             await energyContract.unpause();
-            await energyContract.burn(amount);
+            await expect(energyContract.burn(amount, USDC_ADDRESS))
+                .to.emit(energyContract, "Burn")
+                .withArgs(owner.address, amount, USDC_ADDRESS, price);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(0);
+        });
+
+        it("Should not be able to burn if not funds with selected token", async () => {
+            const { energyContract, owner } = await loadFixture(deployFixture);
+
+            const amount = BigInt(100);
+            await approvePaymentToken(amount, usdcContract);
+
+            await energyContract.mint(owner.address, amount, USDC_ADDRESS);
+            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
+
+            await expect(energyContract.burn(amount, USDT_ADDRESS)).to.be.revertedWithCustomError(energyContract, "NotEnoughFunds()");
         });
     });
 });
