@@ -5,10 +5,14 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./Oracle.sol";
 
 contract Energy is ERC20, Pausable, Ownable {
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
-    address public hdaoToken;
+
+    address public oracle;
+    uint128 public oracleTokenMintPrice;
+    address public oraclePaymentToken;
 
     error InvalidParams();
     error Underpaid();
@@ -17,21 +21,29 @@ contract Energy is ERC20, Pausable, Ownable {
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
 
-    constructor(address _hdaoToken, address[] memory _fixedExchangeTokens, uint[] memory _fixedExchangeRates) 
+    constructor(
+        address _oracle,
+        address _oraclePaymentToken,
+        uint128 _oracleTokenMintPrice, // $2.6 in tokenB = 1 ENRG
+        address[] memory _fixedExchangeTokens, 
+        uint[] memory _fixedExchangeRates) 
         ERC20("Energy", "ENRG") 
     {
-        if(_hdaoToken == address(0)) revert InvalidParams();
-        hdaoToken = _hdaoToken;
+        setOracle(_oracle, _oraclePaymentToken, _oracleTokenMintPrice);
         setFixedExchangeRates(_fixedExchangeTokens, _fixedExchangeRates);
     }
 
-    function setHdaoToken(address _hdaoToken) 
+    function setOracle(address _oracle, address _oraclePaymentToken, uint128 _oracleTokenMintPrice) 
         public 
         onlyOwner 
     {
-        require(_hdaoToken != address(0), "Invalid Params");
+        if(_oracle == address(0)) revert InvalidParams();
+        if(_oraclePaymentToken == address(0)) revert InvalidParams();
+        if(_oracleTokenMintPrice <= 0) revert InvalidParams();
 
-        hdaoToken = _hdaoToken;
+        oracle = _oracle;
+        oraclePaymentToken = _oraclePaymentToken;
+        oracleTokenMintPrice = _oracleTokenMintPrice;
     }
 
     function setFixedExchangeRates(address[] memory _fixedExchangeTokens, uint[] memory _fixedExchangeRates) 
@@ -67,11 +79,11 @@ contract Energy is ERC20, Pausable, Ownable {
         whenNotPaused
     {
         if(_amount == 0) revert InvalidParams();
-        if(fixedExchangeRate[_paymentToken] == 0) revert InvalidParams();
+        if(fixedExchangeRate[_paymentToken] == 0 && _paymentToken != oraclePaymentToken) revert InvalidParams();
 
         uint256 _price = 0;
-        if(false){
-
+        if(_paymentToken == oraclePaymentToken){
+            _price = getMintPriceWithOracle(uint128(_amount));
         }else{
             _price = fixedExchangeRate[_paymentToken]*_amount;
         }
@@ -83,6 +95,15 @@ contract Energy is ERC20, Pausable, Ownable {
         _mint(_to, _amount);
         
         emit Mint(_to, _amount, _paymentToken, _price);
+    }
+
+    function getMintPriceWithOracle(uint128 _amount)
+        public
+        view
+        returns (uint256)
+    {
+        if(_amount == 0) revert InvalidParams();
+        return Oracle(oracle).estimateAmountOut(oraclePaymentToken, _amount*oracleTokenMintPrice);
     }
 
     function _beforeTokenTransfer(address _from, address _to, uint256 _amount) 

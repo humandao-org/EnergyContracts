@@ -18,7 +18,13 @@ describe("UniswapV3Twap", () => {
 
         // Deploying Oracle
         const contractFactory = await ethers.getContractFactory("UniswapV3Twap");
-        uniswapV3Twap = await contractFactory.deploy();
+        uniswapV3Twap = await contractFactory.deploy(
+            UNISWAP_FACTORY,
+            TOKEN_A,
+            TOKEN_B,
+            FEE,
+            30*60 // 30 minutes twap duration
+        );
         await uniswapV3Twap.waitForDeployment();
 
         return { uniswapV3Twap, owner, alice, bob };
@@ -35,17 +41,15 @@ describe("UniswapV3Twap", () => {
         it("Get price", async () => {
             const { uniswapV3Twap } = await loadFixture(deployFixture);
 
-            const secondsAgo = 30;
             const tokenIn = TOKEN_A; // USDC to WETH
             const tokenOut = TOKEN_B;
-
             const tokenInContract: IERC20Metadata = await ethers.getContractAt("IERC20Metadata", tokenIn);
             const tokenOutContract: IERC20Metadata = await ethers.getContractAt("IERC20Metadata", tokenOut);
             const tokenInDecimals: bigint = await tokenInContract.decimals();
             const tokenOutDecimals: bigint = await tokenOutContract.decimals();
 
-            const amount: bigint = BigInt(20) * (BigInt(10) ** tokenInDecimals);
-            const price: bigint = await uniswapV3Twap.estimateAmountOut(UNISWAP_FACTORY, TOKEN_A, TOKEN_B, FEE, tokenOut, amount, secondsAgo)
+            const amount: bigint = BigInt(1600) * (BigInt(10) ** tokenInDecimals);
+            const price: bigint = await uniswapV3Twap.estimateAmountOut(tokenOut, amount)
 
             // console.log('price: ', ethers.formatUnits(price, tokenOutDecimals));
             expect(price).to.be.greaterThan(0);

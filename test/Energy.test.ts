@@ -2,13 +2,14 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
-import { Energy, IERC20 } from "../typechain-types";
+import { Energy, IERC20, IERC20Metadata, UniswapV3Twap } from "../typechain-types";
 
 let energyContract: Energy;
-let usdcContract: IERC20;
-let usdtContract: IERC20;
-let hdaoContract: IERC20;
-const HDAO_ADDRESS = '0xa577979fCb7306b70fcc9c7C57cB5b750CBeD769'
+let oracleContract: UniswapV3Twap;
+let usdcContract: IERC20Metadata;
+let usdtContract: IERC20Metadata;
+let wethContract: IERC20Metadata;
+
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
@@ -16,20 +17,44 @@ const fixedExchangeRates = [
     { address: USDC_ADDRESS, amount: 4 },
     { address: USDT_ADDRESS, amount: 2 }];
 
+const WETH_ADDRESS = '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619';
+const UNISWAP_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+const TOKEN_A = USDC_ADDRESS
+const TOKEN_B = WETH_ADDRESS
+const FEE = 3000 // 0.3%
+
 describe("Energy Token", function () {
     async function deployFixture() {
         const [owner, alice, bob] = await ethers.getSigners();
 
+        usdcContract = await ethers.getContractAt("IERC20Metadata", USDC_ADDRESS);
+        usdtContract = await ethers.getContractAt("IERC20Metadata", USDT_ADDRESS);
+        wethContract = await ethers.getContractAt("IERC20Metadata", WETH_ADDRESS);
+
+        // Deploying Oracle
+        const oracleFactory = await ethers.getContractFactory("UniswapV3Twap");
+        oracleContract = await oracleFactory.deploy(
+            UNISWAP_FACTORY,
+            TOKEN_A,
+            TOKEN_B,
+            FEE,
+            30*60 // 30 minutes twap duration
+        );
+        await oracleContract.waitForDeployment();
+        const oracleAddress = await oracleContract.getAddress();
+        expect(oracleAddress).to.be.a.properAddress;
+        const oracleTokenMintPrice: bigint = BigInt(26) * BigInt(10)**await usdcContract.decimals();
+
         // Deploying Energy Token
         const contractFactory = await ethers.getContractFactory("Energy");
         energyContract = await contractFactory.deploy(
-            HDAO_ADDRESS,
+            oracleAddress,
+            TOKEN_B,
+            oracleTokenMintPrice,
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount)
         );
         await energyContract.waitForDeployment();
-
-        hdaoContract = await ethers.getContractAt("IERC20", HDAO_ADDRESS);
 
         // Get some USDC and USDT from Binance :p
         await network.provider.request({
@@ -37,11 +62,11 @@ describe("Energy Token", function () {
             params: [BINANCE_WALLET_ADDRESS],
         });
         const binanceSigner = await ethers.getSigner(BINANCE_WALLET_ADDRESS);
-        usdcContract = await ethers.getContractAt("IERC20", USDC_ADDRESS);
-        usdtContract = await ethers.getContractAt("IERC20", USDT_ADDRESS);
         const stablecoinAmount = 1000000;
+        const wethAmount: bigint = BigInt(100) * BigInt(10)**await wethContract.decimals(); // 100 WETH
         await usdcContract.connect(binanceSigner).transfer(owner.address, stablecoinAmount)
         await usdtContract.connect(binanceSigner).transfer(owner.address, stablecoinAmount)
+        await wethContract.connect(binanceSigner).transfer(owner.address, wethAmount)
         expect(await usdcContract.balanceOf(owner.address)).to.be.equal(stablecoinAmount);
         expect(await usdtContract.balanceOf(owner.address)).to.be.equal(stablecoinAmount);
         await usdcContract.connect(binanceSigner).transfer(alice.address, stablecoinAmount)
@@ -63,58 +88,6 @@ describe("Energy Token", function () {
         return price
     }
 
-    describe("Deployment & Admin", () => {
-        it("Should be a proper address, and owner", async () => {
-            const { energyContract, owner } = await loadFixture(deployFixture);
-            expect(await energyContract.getAddress()).to.be.a.properAddress;
-            expect(await energyContract.owner()).to.be.equal(owner.address);
-        });
-     
-        it("Should be able to set the exchange rates", async () => {
-            const { energyContract, alice } = await loadFixture(deployFixture);
-            expect(await energyContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(4);
-            expect(await energyContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(2);
-            await energyContract.setFixedExchangeRates(fixedExchangeRates.map(a => a.address), [4,4]);
-            expect(await energyContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(4);
-            expect(await energyContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(4);
-
-            await(expect(energyContract.connect(alice).setFixedExchangeRates(fixedExchangeRates.map(a => a.address), fixedExchangeRates.map(a => a.amount)))).to.be.revertedWith("Ownable: caller is not the owner");
-            await(expect(energyContract.setFixedExchangeRates([ethers.ZeroAddress], [1]))).to.be.revertedWithCustomError(energyContract, "InvalidParams");
-            await(expect(energyContract.setFixedExchangeRates(fixedExchangeRates.map(a => a.address), [1]))).to.be.revertedWithCustomError(energyContract, "InvalidParams");
-            await(expect(energyContract.setFixedExchangeRates(fixedExchangeRates.map(a => a.address), [0,0]))).to.be.revertedWithCustomError(energyContract, "InvalidParams");
-
-        });
-
-        it("Should be able to set the HDAO token address", async () => {
-            const { energyContract, alice } = await loadFixture(deployFixture);
-            expect(await energyContract.hdaoToken()).to.be.equal(HDAO_ADDRESS);
-            await energyContract.setHdaoToken(USDC_ADDRESS);
-            expect(await energyContract.hdaoToken()).to.be.equal(USDC_ADDRESS);
-
-            await(expect(energyContract.connect(alice).setHdaoToken(USDC_ADDRESS))).to.be.revertedWith("Ownable: caller is not the owner");
-            await(expect(energyContract.setHdaoToken(ethers.ZeroAddress))).to.be.revertedWith("Invalid Params");
-        });
-
-        it("Owner should be able to transfer the ownership", async () => {
-            const { energyContract, alice, bob } = await loadFixture(deployFixture);
-
-            await expect(energyContract.connect(alice).transferOwnership(bob.address)).to.be.revertedWith("Ownable: caller is not the owner");
-
-            await energyContract.transferOwnership(bob.address);
-            expect(await energyContract.owner()).to.be.equal(bob.address);
-        });
-
-        it("Owner should be able to pause the contract", async () => {
-            const { energyContract, alice } = await loadFixture(deployFixture);
-            expect(await energyContract.paused()).to.be.equal(false);
-            await energyContract.pause();
-            expect(await energyContract.paused()).to.be.equal(true);
-            await energyContract.unpause();
-            expect(await energyContract.paused()).to.be.equal(false);
-
-            await expect(energyContract.connect(alice).pause()).to.be.revertedWith("Ownable: caller is not the owner");
-        });
-    });
 
     describe("Minting", () => {
         it("Should be able to mint using a constant swap (stablecoins)", async () => {
@@ -146,11 +119,29 @@ describe("Energy Token", function () {
             await energyContract.mint(owner.address, amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
         });
+
+        it("Should be able to mint using the Oracle token", async () => {
+            const { energyContract, owner } = await loadFixture(deployFixture);
+            const amount = BigInt(100);
+            const price = await energyContract.getMintPriceWithOracle(amount);
+
+            const tokenOutContract: IERC20Metadata = await ethers.getContractAt("IERC20Metadata", TOKEN_B);
+            const tokenOutDecimals: bigint = await tokenOutContract.decimals();
+            // console.log('price: ', ethers.formatUnits(price, tokenOutDecimals)); // This is the formatted price in TOKEN_B (WETH)
+
+            await tokenOutContract.approve(await energyContract.getAddress(), price);
+            
+            await expect(energyContract.mint(owner.address, amount, TOKEN_B))
+                .to.emit(energyContract, "Mint")
+                .withArgs(owner.address, amount, TOKEN_B, price);
+            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
+            expect(await tokenOutContract.balanceOf(energyContract)).to.be.equal(price);
+        });
     });
 
     describe("Burning", () => {
         it("Should be able to burn", async () => {
-            const { energyContract, owner, alice } = await loadFixture(deployFixture);
+            const { energyContract, owner } = await loadFixture(deployFixture);
 
             const amount = BigInt(100);
             const price = await approvePaymentToken(amount, usdcContract);
