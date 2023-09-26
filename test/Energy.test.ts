@@ -1,13 +1,14 @@
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { Energy, IERC20 } from "../typechain-types";
 import { ethers, network } from "hardhat";
-import { Contract } from "ethers";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { Energy, IERC20 } from "../typechain-types";
 
 let energyContract: Energy;
 let usdcContract: IERC20;
 let usdtContract: IERC20;
+let hdaoContract: IERC20;
+const HDAO_ADDRESS = '0xa577979fCb7306b70fcc9c7C57cB5b750CBeD769'
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
@@ -22,10 +23,13 @@ describe("Energy Token", function () {
         // Deploying Energy Token
         const contractFactory = await ethers.getContractFactory("Energy");
         energyContract = await contractFactory.deploy(
+            HDAO_ADDRESS,
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount)
         );
         await energyContract.waitForDeployment();
+
+        hdaoContract = await ethers.getContractAt("IERC20", HDAO_ADDRESS);
 
         // Get some USDC and USDT from Binance :p
         await network.provider.request({
@@ -79,6 +83,16 @@ describe("Energy Token", function () {
             await(expect(energyContract.setFixedExchangeRates(fixedExchangeRates.map(a => a.address), [1]))).to.be.revertedWithCustomError(energyContract, "InvalidParams");
             await(expect(energyContract.setFixedExchangeRates(fixedExchangeRates.map(a => a.address), [0,0]))).to.be.revertedWithCustomError(energyContract, "InvalidParams");
 
+        });
+
+        it("Should be able to set the HDAO token address", async () => {
+            const { energyContract, alice } = await loadFixture(deployFixture);
+            expect(await energyContract.hdaoToken()).to.be.equal(HDAO_ADDRESS);
+            await energyContract.setHdaoToken(USDC_ADDRESS);
+            expect(await energyContract.hdaoToken()).to.be.equal(USDC_ADDRESS);
+
+            await(expect(energyContract.connect(alice).setHdaoToken(USDC_ADDRESS))).to.be.revertedWith("Ownable: caller is not the owner");
+            await(expect(energyContract.setHdaoToken(ethers.ZeroAddress))).to.be.revertedWith("Invalid Params");
         });
 
         it("Owner should be able to transfer the ownership", async () => {
