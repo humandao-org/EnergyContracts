@@ -3,12 +3,15 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./DexTool.sol";
 
 contract Energy is ERC20, Pausable, Ownable {
+    using SafeERC20 for IERC20;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
+    address[] public fixedExchangeTokens;
 
     address public dexTool;
     address public oraclePaymentToken;
@@ -23,6 +26,7 @@ contract Energy is ERC20, Pausable, Ownable {
 
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
+    event Withdrawal(uint amount, address erc20, uint when);
 
     constructor(
         address _dexTool,
@@ -61,6 +65,7 @@ contract Energy is ERC20, Pausable, Ownable {
     {
         if(_fixedExchangeTokens.length != _fixedExchangeRates.length) revert InvalidParams();
 
+        fixedExchangeTokens = _fixedExchangeTokens;
         for(uint8 i = 0; i < _fixedExchangeTokens.length; i++) {
             if(_fixedExchangeTokens[i] == address(0)) revert InvalidParams();
             if(_fixedExchangeRates[i] == 0) revert InvalidParams();
@@ -76,6 +81,21 @@ contract Energy is ERC20, Pausable, Ownable {
 
         autoReplenish = _autoReplenish;
         tokenReplenishPrice = _tokenReplenishPrice;
+    }
+
+    function getFixedExchangeTokensBalances()
+        public
+        view
+        returns (address[] memory, uint256[] memory)
+    {
+        uint256[] memory _balances = new uint256[](fixedExchangeTokens.length);
+
+        for(uint8 i = 0; i < fixedExchangeTokens.length; i++) {
+            IERC20 _token = IERC20(fixedExchangeTokens[i]);
+            _balances[i] = _token.balanceOf(address(this));
+        }
+
+        return (fixedExchangeTokens, _balances);
     }
 
     function pause() 
@@ -165,4 +185,16 @@ contract Energy is ERC20, Pausable, Ownable {
     //     uint256 _amountInputMax = 0;
     //     return DexTool(dexTool).swapExactOutputSingle(_amount*tokenReplenishPrice, _amountInputMax);
     // }
+
+    function withdraw(address _erc20) 
+        public 
+        onlyOwner
+    {       
+        IERC20 _withdrawToken = IERC20(_erc20);
+        uint _balance = _withdrawToken.balanceOf(address(this));
+
+        _withdrawToken.safeTransfer(owner(), _balance);
+
+        emit Withdrawal(_balance, _erc20, block.timestamp);
+    }
 }

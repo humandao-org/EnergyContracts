@@ -151,6 +151,10 @@ describe("Energy Token", async () => {
             expect(await energyContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(testFixedExchangeRates[0].amount);
             expect(await energyContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(testFixedExchangeRates[1].amount);
 
+            const [tokens, balances] = await energyContract.getFixedExchangeTokensBalances();
+            expect(tokens).to.be.deep.equal(testFixedExchangeRates.map(a => a.address));
+            expect(balances).to.be.deep.equal(testFixedExchangeRates.map(a => BigInt(0)));
+
             // ERRORS
             await expect(energyContract.connect(alice).setFixedExchangeRates([USDC_ADDRESS, USDT_ADDRESS], [1])).to.be.revertedWith("Ownable: caller is not the owner");
             await expect(energyContract.setFixedExchangeRates([USDC_ADDRESS, USDT_ADDRESS], [1])).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
@@ -315,4 +319,38 @@ describe("Energy Token", async () => {
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(0);
         });
     });
+
+    describe("Withdrawals", () => {
+        describe("Validations", () => {    
+          it("Should revert with the right error if called from another account", async () => {
+            const { energyContract, alice } = await loadFixture(deployFixture);
+    
+            await expect(energyContract.connect(alice).withdraw(USDC_ADDRESS)).to.be.revertedWith("Ownable: caller is not the owner");
+          });
+        });
+    
+        describe("Events", function () {
+          it("Should emit an event on withdrawals", async () => {
+            const { energyContract } = await loadFixture(deployFixture);
+
+            await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
+          });
+        });
+    
+        describe("Transfers", function () {
+          it("Should transfer the funds (ERC20) to the owner", async function () {
+            const { energyContract, owner } = await loadFixture(deployFixture);
+            
+            const amount = BigInt(100);
+            const price = await approvePaymentToken(amount, usdcContract);
+            await energyContract.mint(owner.address, amount, USDC_ADDRESS);
+            
+            const balanceBefore = await usdcContract.balanceOf(owner.address);
+
+            await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
+            expect(await usdcContract.balanceOf(await energyContract.getAddress())).to.be.equal(0);
+            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(price+balanceBefore);
+          });
+        });
+      });
 });
