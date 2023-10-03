@@ -2,10 +2,10 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
-import { Energy, IERC20, IERC20Metadata, UniswapV3 } from "../typechain-types";
+import { Energy, EnergyLogic, IERC20, IERC20Metadata } from "../typechain-types";
 
 let energyContract: Energy;
-let dexToolsContract: UniswapV3;
+let energyLogicContract: EnergyLogic;
 let usdcContract: IERC20Metadata;
 let usdtContract: IERC20Metadata;
 let wethContract: IERC20Metadata;
@@ -13,16 +13,10 @@ let wethContract: IERC20Metadata;
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
+const WETH_ADDRESS = '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619';
 const fixedExchangeRates = [
     { address: USDC_ADDRESS, amount: 4 },
     { address: USDT_ADDRESS, amount: 2 }];
-
-const WETH_ADDRESS = '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619';
-const UNISWAP_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-const UNISWAP_SWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
-const TOKEN_A = USDC_ADDRESS
-const TOKEN_B = WETH_ADDRESS
-const FEE = 3000 // 0.3%
 
 describe("Energy Token", async () => {
     before(async () => {
@@ -33,6 +27,18 @@ describe("Energy Token", async () => {
             }]
         });
     });
+     
+    async function approvePaymentToken(amount: bigint, paymentToken: IERC20, account?: HardhatEthersSigner): Promise<bigint> {
+        const exchangeRate = await energyLogicContract.fixedExchangeRate(await paymentToken.getAddress());
+        const price = amount * BigInt(exchangeRate)
+        if(!account) {
+            const [owner] = await ethers.getSigners();
+            account = owner;
+        }
+
+        await paymentToken.connect(account).approve(await energyContract.getAddress(), price);
+        return price
+    }
 
     async function deployFixture() {
         const [owner, alice, bob] = await ethers.getSigners();
@@ -41,33 +47,25 @@ describe("Energy Token", async () => {
         usdtContract = await ethers.getContractAt("IERC20Metadata", USDT_ADDRESS);
         wethContract = await ethers.getContractAt("IERC20Metadata", WETH_ADDRESS);
 
-        // Deploying DexTools
-        const dexToolsFactory = await ethers.getContractFactory("UniswapV3");
-        dexToolsContract = await dexToolsFactory.deploy(
-            UNISWAP_FACTORY,
-            UNISWAP_SWAP_ROUTER,
-            TOKEN_A,
-            TOKEN_B,
-            FEE,
-            30*60 // 30 minutes twap duration
-        );
-        await dexToolsContract.waitForDeployment();
-        const dexToolsAddress = await dexToolsContract.getAddress();
-        expect(dexToolsAddress).to.be.a.properAddress;
-        const oracleTokenMintPrice: bigint = BigInt(26) * BigInt(10)**await usdcContract.decimals();
-        const tokenReplenishPrice: bigint = BigInt(2) * BigInt(10)**await usdcContract.decimals();
-
-        // Deploying Energy Token
-        const contractFactory = await ethers.getContractFactory("Energy");
-        energyContract = await contractFactory.deploy(
-            dexToolsAddress,
-            TOKEN_B,
-            oracleTokenMintPrice,
-            tokenReplenishPrice,
+        // Deploying Energy Token Logic
+        const energyLogicFactory = await ethers.getContractFactory("EnergyLogic");
+        energyLogicContract = await energyLogicFactory.deploy(
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount)
         );
+        await energyLogicContract.waitForDeployment();
+        const energyLogicAddress = await energyLogicContract.getAddress();
+        expect(energyLogicAddress).to.be.a.properAddress;
+
+        // Deploying Energy Token
+        const contractFactory = await ethers.getContractFactory("Energy");
+        energyContract = await contractFactory.deploy(energyLogicAddress);
         await energyContract.waitForDeployment();
+        const energyAddress = await energyContract.getAddress();
+        expect(energyAddress).to.be.a.properAddress;
+
+        // Set the energy token address into logic contract
+        energyLogicContract.setEnergyToken(energyAddress);
 
         // Get some USDC and USDT from Binance :p
         await network.provider.request({
@@ -90,17 +88,6 @@ describe("Energy Token", async () => {
 
         return { energyContract, owner, alice, bob };
     }
- 
-    async function approvePaymentToken(amount: bigint, paymentToken: IERC20, account?: HardhatEthersSigner): Promise<bigint> {
-        const exchangeRate = await energyContract.fixedExchangeRate(await paymentToken.getAddress());
-        const price = amount * BigInt(exchangeRate)
-        if(!account) {
-            const [owner] = await ethers.getSigners();
-            account = owner;
-        }
-        await paymentToken.connect(account).approve(await energyContract.getAddress(), price)
-        return price
-    }
 
     describe("Deployment & Admin", () => {
         it("Should be a proper address", async () => {
@@ -119,69 +106,23 @@ describe("Energy Token", async () => {
             await expect(energyContract.connect(alice).transferOwnership(ethers.ZeroAddress)).to.be.revertedWith("Ownable: new owner is the zero address");
         })
 
-        it("Should be able to change its Oracle", async () => {
-            const { energyContract, alice } = await loadFixture(deployFixture);
-            const testoracleTokenMintPrice: bigint = BigInt(666) * BigInt(10)**await usdcContract.decimals();
-
-            await energyContract.setOracle(UNISWAP_FACTORY, TOKEN_A, testoracleTokenMintPrice);
-            expect(await energyContract.dexTool()).to.be.equal(UNISWAP_FACTORY);
-            expect(await energyContract.oraclePaymentToken()).to.be.equal(TOKEN_A);
-            expect(await energyContract.oracleTokenMintPrice()).to.be.equal(testoracleTokenMintPrice);
-
-            await energyContract.setOracle(UNISWAP_FACTORY, ethers.ZeroAddress, testoracleTokenMintPrice);
-            expect(await energyContract.oraclePaymentToken()).to.be.equal(ethers.ZeroAddress);
-
-            // ERRORS
-            await expect(energyContract.connect(alice).setOracle(UNISWAP_FACTORY, TOKEN_A, testoracleTokenMintPrice)).to.be.revertedWith("Ownable: caller is not the owner");
-            await expect(energyContract.setOracle(ethers.ZeroAddress, TOKEN_A, testoracleTokenMintPrice)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.setOracle(UNISWAP_FACTORY, TOKEN_A, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");            
-        });
-
-        it("Should be able to set the Fixed Exchange Rates", async () => {
-            const { energyContract, owner, alice } = await loadFixture(deployFixture);
-
-            const testFixedExchangeRates = [
-                { address: USDT_ADDRESS, amount: 666 },
-                { address: USDC_ADDRESS, amount: 42 }];
-
-            await energyContract.setFixedExchangeRates(
-                testFixedExchangeRates.map(a => a.address),
-                testFixedExchangeRates.map(a => a.amount)
-            );
-            expect(await energyContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(testFixedExchangeRates[0].amount);
-            expect(await energyContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(testFixedExchangeRates[1].amount);
-
-            const [tokens, balances] = await energyContract.getFixedExchangeTokensBalances();
-            expect(tokens).to.be.deep.equal(testFixedExchangeRates.map(a => a.address));
-            expect(balances).to.be.deep.equal(testFixedExchangeRates.map(a => BigInt(0)));
-
-            // ERRORS
-            await expect(energyContract.connect(alice).setFixedExchangeRates([USDC_ADDRESS, USDT_ADDRESS], [1])).to.be.revertedWith("Ownable: caller is not the owner");
-            await expect(energyContract.setFixedExchangeRates([USDC_ADDRESS, USDT_ADDRESS], [1])).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.setFixedExchangeRates([USDC_ADDRESS, USDT_ADDRESS], [1,0])).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.setFixedExchangeRates([USDC_ADDRESS, ethers.ZeroAddress], [1,2])).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-        });
-
-        it("Should be able to set Auto Replenish", async () => {
-            const { energyContract, owner, alice } = await loadFixture(deployFixture);
-
-            const testTokenReplenishPrice = 23;
-            await energyContract.setAutoReplenish(false, testTokenReplenishPrice);
-            expect(await energyContract.autoReplenish()).to.be.equal(false);
-            expect(await energyContract.tokenReplenishPrice()).to.be.equal(testTokenReplenishPrice);
-            
-            // Errors
-            await expect(energyContract.connect(alice).setAutoReplenish(false, testTokenReplenishPrice)).to.be.revertedWith("Ownable: caller is not the owner");
-            await expect(energyContract.setAutoReplenish(false, 0)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-        });
-
         it("Should be able to Pause", async () => {
-            const { energyContract, owner, alice } = await loadFixture(deployFixture);
+            const { energyContract, alice } = await loadFixture(deployFixture);
             await energyContract.pause();
             expect(await energyContract.paused()).to.be.equal(true);
 
             // Errors
             await expect(energyContract.connect(alice).pause()).to.be.revertedWith("Ownable: caller is not the owner");
+        });
+
+        it("Should be able to change the EnergyLogic", async () => {
+            const { energyContract, alice } = await loadFixture(deployFixture);
+            await energyContract.setEnergyLogic(alice.address);
+
+            expect(await energyContract.energyLogic()).to.be.equal(alice.address);
+
+            // Errors
+            await expect(energyContract.connect(alice).setEnergyLogic(alice.address)).to.be.revertedWith("Ownable: caller is not the owner");
         });
     });
 
@@ -203,7 +144,7 @@ describe("Energy Token", async () => {
             await expect(energyContract.mint(owner.address, 0, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
             await expect(energyContract.mint(owner.address, amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
             await expect(energyContract.mint(owner.address, amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "Underpaid()");
+            await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyLogicContract, "Underpaid()");
         });
 
         it("Should not be able to mint if paused", async () => {
@@ -217,32 +158,6 @@ describe("Energy Token", async () => {
             await energyContract.unpause();
             await energyContract.mint(owner.address, amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-        });
-
-        it("Should be able to mint using the Oracle token", async () => {
-            const { energyContract, owner } = await loadFixture(deployFixture);
-            const amount = BigInt(100);
-            const price = await energyContract.getMintPriceWithOracle(amount);
-
-            const tokenOutContract: IERC20Metadata = await ethers.getContractAt("IERC20Metadata", TOKEN_B);
-            const tokenOutDecimals: bigint = await tokenOutContract.decimals();
-            // console.log('price: ', ethers.formatUnits(price, tokenOutDecimals)); // This is the formatted price in TOKEN_B (WETH)
-
-            await tokenOutContract.approve(await energyContract.getAddress(), price);
-            
-            await expect(energyContract.mint(owner.address, amount, TOKEN_B))
-                .to.emit(energyContract, "Mint")
-                .withArgs(owner.address, amount, TOKEN_B, price);
-            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-            expect(await tokenOutContract.balanceOf(energyContract)).to.be.equal(price);
-
-            // Errors
-            await expect(energyContract.mint(owner.address, 0, TOKEN_B)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, TOKEN_B)).to.be.revertedWithCustomError(energyContract, "Underpaid()");
-            await energyContract.setOracle(await dexToolsContract.getAddress(), ethers.ZeroAddress, 1);
-            await expect(energyContract.mint(owner.address, amount, TOKEN_B)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
         });
     });
 
@@ -297,7 +212,7 @@ describe("Energy Token", async () => {
             // Errors
             await expect(energyContract.burn(0, USDT_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
             await expect(energyContract.burn(amountOwner, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.burn(amountOwner*BigInt(2), USDT_ADDRESS)).to.be.revertedWithCustomError(energyContract, "NotEnoughFunds()");
+            await expect(energyContract.burn(amountOwner*BigInt(2), USDT_ADDRESS)).to.be.revertedWithCustomError(energyLogicContract, "NotEnoughFunds()");
         });
 
         it("Should not be able to burn if paused", async () => {
@@ -322,35 +237,35 @@ describe("Energy Token", async () => {
 
     describe("Withdrawals", () => {
         describe("Validations", () => {    
-          it("Should revert with the right error if called from another account", async () => {
-            const { energyContract, alice } = await loadFixture(deployFixture);
-    
-            await expect(energyContract.connect(alice).withdraw(USDC_ADDRESS)).to.be.revertedWith("Ownable: caller is not the owner");
-          });
+            it("Should revert with the right error if called from another account", async () => {
+                const { energyContract, alice } = await loadFixture(deployFixture);
+                await expect(energyContract.connect(alice).withdraw(USDC_ADDRESS)).to.be.revertedWith("Ownable: caller is not the owner");
+            });
         });
     
         describe("Events", function () {
-          it("Should emit an event on withdrawals", async () => {
-            const { energyContract } = await loadFixture(deployFixture);
+            it("Should emit an event on withdrawals", async () => {
+                const { energyContract } = await loadFixture(deployFixture);
 
-            await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
-          });
+                await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
+            });
         });
     
         describe("Transfers", function () {
-          it("Should transfer the funds (ERC20) to the owner", async function () {
-            const { energyContract, owner } = await loadFixture(deployFixture);
-            
-            const amount = BigInt(100);
-            const price = await approvePaymentToken(amount, usdcContract);
-            await energyContract.mint(owner.address, amount, USDC_ADDRESS);
-            
-            const balanceBefore = await usdcContract.balanceOf(owner.address);
+            it("Should transfer the funds (ERC20) to the owner", async function () {
+                const { energyContract, owner } = await loadFixture(deployFixture);
 
-            await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
-            expect(await usdcContract.balanceOf(await energyContract.getAddress())).to.be.equal(0);
-            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(price+balanceBefore);
-          });
+                const amount = BigInt(100);
+                const price = await approvePaymentToken(amount, usdcContract);
+                await energyContract.mint(owner.address, amount, USDC_ADDRESS);
+
+                const balanceBefore = await usdcContract.balanceOf(owner.address);
+
+                await expect(energyContract.withdraw(USDC_ADDRESS)).to.emit(energyContract, "Withdrawal");
+                expect(await usdcContract.balanceOf(await energyContract.getAddress())).to.be.equal(0);
+                expect(await usdcContract.balanceOf(owner.address)).to.be.equal(price+balanceBefore);
+            });
         });
-      });
+    });
+
 });
