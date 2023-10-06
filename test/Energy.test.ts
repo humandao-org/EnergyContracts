@@ -141,9 +141,9 @@ describe("Energy Token", async () => {
             expect(await usdcContract.balanceOf(energyContract)).to.be.equal(price);
 
             // Errors
-            await expect(energyContract.mint(owner.address, 0, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.mint(owner.address, amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
+            await expect(energyContract.mint(owner.address, 0, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParamsZeroValue()");
+            await expect(energyContract.mint(owner.address, amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParamsZeroAddress()");
+            await expect(energyContract.mint(owner.address, amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(energyLogicContract, "InvalidParamsZeroValue()");
             await expect(energyContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyLogicContract, "Underpaid()");
         });
 
@@ -210,8 +210,8 @@ describe("Energy Token", async () => {
             expect(await usdcContract.balanceOf(owner.address)).to.be.equal(ownerUsdcBefore);
 
             // Errors
-            await expect(energyContract.burn(0, USDT_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
-            await expect(energyContract.burn(amountOwner, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParams()");
+            await expect(energyContract.burn(0, USDT_ADDRESS)).to.be.revertedWithCustomError(energyContract, "InvalidParamsZeroValue()");
+            await expect(energyContract.burn(amountOwner, ethers.ZeroAddress)).to.be.revertedWithCustomError(energyContract, "InvalidParamsZeroAddress()");
             await expect(energyContract.burn(amountOwner*BigInt(2), USDT_ADDRESS)).to.be.revertedWithCustomError(energyLogicContract, "NotEnoughFunds()");
         });
 

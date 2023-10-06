@@ -8,13 +8,17 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 contract EnergyLogic is Ownable{
     using SafeERC20 for IERC20;
 
-    address energyToken;
+    address public energyToken;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
     address[] public fixedExchangeTokens;
 
     error InvalidParams();
+    error InvalidParamsLength();
+    error InvalidParamsZeroAddress();
+    error InvalidParamsZeroValue();
     error Underpaid();
     error NotEnoughFunds();
+    error OnlyEnergy();
 
     constructor(
         address[] memory _fixedExchangeTokens, 
@@ -34,12 +38,12 @@ contract EnergyLogic is Ownable{
         public 
         onlyOwner 
     {
-        if(_fixedExchangeTokens.length != _fixedExchangeRates.length) revert InvalidParams();
+        if(_fixedExchangeTokens.length != _fixedExchangeRates.length) revert InvalidParamsLength();
 
         fixedExchangeTokens = _fixedExchangeTokens;
         for(uint8 i = 0; i < _fixedExchangeTokens.length; i++) {
-            if(_fixedExchangeTokens[i] == address(0)) revert InvalidParams();
-            if(_fixedExchangeRates[i] == 0) revert InvalidParams();
+            if(_fixedExchangeTokens[i] == address(0)) revert InvalidParamsZeroAddress();
+            if(_fixedExchangeRates[i] == 0) revert InvalidParamsZeroValue();
             fixedExchangeRate[_fixedExchangeTokens[i]] = _fixedExchangeRates[i];
         }
     }
@@ -49,7 +53,7 @@ contract EnergyLogic is Ownable{
         onlyEnergy
         returns (address, uint256)
     {
-        if(fixedExchangeRate[_paymentToken] == 0) revert InvalidParams();
+        if(fixedExchangeRate[_paymentToken] == 0) revert InvalidParamsZeroValue();
 
         uint256 _price = fixedExchangeRate[_paymentToken]*_amount;
         IERC20 paymentToken = IERC20(_paymentToken);
@@ -70,7 +74,7 @@ contract EnergyLogic is Ownable{
         onlyEnergy
         returns (address, uint256)
     {
-        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParams();
+        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
 
         uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
         IERC20 _paymentToken = IERC20(_paymentTokenAddress);
@@ -86,7 +90,7 @@ contract EnergyLogic is Ownable{
     }
 
     modifier onlyEnergy() {
-        require(energyToken == _msgSender(), "OnlyEnergy: caller is not the Energy Token");
+        if(energyToken != _msgSender()) revert OnlyEnergy();
         _;
     }
 }

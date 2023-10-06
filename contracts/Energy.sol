@@ -14,6 +14,8 @@ contract Energy is ERC20, Pausable, Ownable {
     address public energyLogic;
 
     error InvalidParams();
+    error InvalidParamsZeroAddress();
+    error InvalidParamsZeroValue();
 
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
@@ -52,8 +54,8 @@ contract Energy is ERC20, Pausable, Ownable {
         public 
         whenNotPaused
     {
-        if(_amount == 0) revert InvalidParams();
-        if(_paymentToken == address(0)) revert InvalidParams();
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_paymentToken == address(0)) revert InvalidParamsZeroAddress();
 
         (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeMint(_to, _amount, _paymentToken);
         
@@ -77,7 +79,8 @@ contract Energy is ERC20, Pausable, Ownable {
     function burn(uint256 _amount, address _paymentTokenAddress)
         public
     {
-        if(_amount == 0) revert InvalidParams();
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
 
         (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeBurn(_msgSender(), _amount, _paymentTokenAddress);
 
