@@ -42,7 +42,6 @@ describe("Energy Token", async () => {
 
     async function deployFixture() {
         const [owner, alice, bob] = await ethers.getSigners();
-
         usdcContract = await ethers.getContractAt("IERC20Metadata", USDC_ADDRESS);
         usdtContract = await ethers.getContractAt("IERC20Metadata", USDT_ADDRESS);
         wethContract = await ethers.getContractAt("IERC20Metadata", WETH_ADDRESS);
@@ -51,7 +50,8 @@ describe("Energy Token", async () => {
         const energyLogicFactory = await ethers.getContractFactory("EnergyLogic");
         energyLogicContract = await energyLogicFactory.deploy(
             fixedExchangeRates.map(a => a.address),
-            fixedExchangeRates.map(a => a.amount)
+            fixedExchangeRates.map(a => a.amount),
+            [WETH_ADDRESS]
         );
         await energyLogicContract.waitForDeployment();
         const energyLogicAddress = await energyLogicContract.getAddress();
@@ -159,6 +159,17 @@ describe("Energy Token", async () => {
             await energyContract.mint(owner.address, amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
         });
+
+        it("Should be able to mint using dynamic token pricing",async () => {
+// 1) User enters the amount of desired $ENRG and selects which token to pay with e.g. Matic, Aave or Mana
+// 2) System finds the dollar amount of the selected token corresponding to $2.60 (the price per energy when paid in $HDAO) and shows the corresponding amount in the selected token to the user.
+// 3) User approves the transaction and pays for gas
+// 4) System receives the tokens and converts it to $USDC (an amount corresponding to $2) and to $HDAO (the remaining part that corresponds to $0.6)
+// 5) System stores the USDC and HDAO on the contract.
+            const { energyContract, owner } = await loadFixture(deployFixture);
+            const amount = BigInt(100);
+            // const price = await approvePaymentToken(amount, wethContract);
+        })
     });
 
     describe("Burning", () => {

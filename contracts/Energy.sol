@@ -62,7 +62,24 @@ contract Energy is ERC20, Pausable, Ownable {
         IERC20(_token).safeTransferFrom(_to, address(this), _price);
         _mint(_to, _amount);
 
-        EnergyLogic(energyLogic).afterMint(_to, _amount, _paymentToken);
+        EnergyLogic(energyLogic).afterMint(_to, _amount, _paymentToken, _price);
+       
+        emit Mint(_to, _amount, _paymentToken, _price);
+    }
+
+    function mintWithDynamic(address _to, uint256 _amount, address _paymentToken)
+        public 
+        whenNotPaused
+    {
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_paymentToken == address(0)) revert InvalidParamsZeroAddress();
+
+        (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeMintWithDynamic(_to, _amount, _paymentToken, 0);
+        
+        IERC20(_token).safeTransferFrom(_to, address(this), _price);
+        _mint(_to, _amount);
+
+        EnergyLogic(energyLogic).afterMintWithDynamic(_to, _amount, _paymentToken, _price);
        
         emit Mint(_to, _amount, _paymentToken, _price);
     }

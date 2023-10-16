@@ -12,6 +12,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@balancer-labs/v2-interfaces@npm:^0.4.0":
+  version: 0.4.0
+  resolution: "@balancer-labs/v2-interfaces@npm:0.4.0"
+  checksum: dd774a51c1020bbfc4dadb5e0ba948f47bcc6f9f3631bc14044058e409da8c207770d78af78e7a272774a4f7230c466a27a722fb01e440a1bf17af04140fef95
+  languageName: node
+  linkType: hard
+
 "@chainsafe/as-sha256@npm:^0.3.1":
   version: 0.3.1
   resolution: "@chainsafe/as-sha256@npm:0.3.1"
@@ -2743,6 +2750,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "enrg-contracts@workspace:."
   dependencies:
+    "@balancer-labs/v2-interfaces": ^0.4.0
     "@nomicfoundation/hardhat-chai-matchers": ^2.0.0
     "@nomicfoundation/hardhat-ethers": ^3.0.0
     "@nomicfoundation/hardhat-network-helpers": ^1.0.0
