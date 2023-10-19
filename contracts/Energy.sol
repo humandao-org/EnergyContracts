@@ -1,123 +1,69 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./EnergyLogic.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
-contract Energy is ERC20, Pausable, Ownable {
-    using SafeERC20 for IERC20;
+contract Energy is ERC20, ERC20Burnable, ERC20Pausable, Ownable, ERC20Permit {
+    address public factory;
 
-    address public energyLogic;
+    error UnauthorizedFactory();
+    error DisabledDefaultBurn();
 
-    error InvalidParams();
-    error InvalidParamsZeroAddress();
-    error InvalidParamsZeroValue();
+    event Mint(address indexed _to, uint256 _amount);
 
-    event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
-    event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
-    event Withdrawal(uint amount, address erc20, uint when);
-
-    constructor(address _energyLogic) ERC20("Energy", "ENRG") {
-        setEnergyLogic(_energyLogic);
+    constructor(address _initialOwner, address _factory)
+        ERC20("Energy", "ENRG")
+        Ownable(_initialOwner)
+        ERC20Permit("Energy")
+    {
+        setFactory(_factory);
     }
 
     function decimals() public view virtual override returns (uint8) {
         return 1;
     }
 
-    function setEnergyLogic(address _energyLogic) 
+    function setFactory(address _factory) 
         public 
         onlyOwner 
     {
-        energyLogic = _energyLogic;
+        factory = _factory;
     }
 
-    function pause() 
-        public 
-        onlyOwner 
-    {
+    function pause() public onlyOwner {
         _pause();
     }
 
-    function unpause() 
-        public 
-        onlyOwner 
-    {
+    function unpause() public onlyOwner {
         _unpause();
     }
 
-    function mint(address _to, uint256 _amount, address _paymentToken)
-        public 
-        whenNotPaused
-    {
-        if(_amount == 0) revert InvalidParamsZeroValue();
-        if(_paymentToken == address(0)) revert InvalidParamsZeroAddress();
+    function mint(address _to, uint256 _amount) public {
+        if(_msgSender() != factory) revert UnauthorizedFactory();
 
-        (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeMint(_to, _amount, _paymentToken);
-        
-        IERC20(_token).safeTransferFrom(_to, address(this), _price);
         _mint(_to, _amount);
-
-        EnergyLogic(energyLogic).afterMint(_to, _amount, _paymentToken, _price);
-       
-        emit Mint(_to, _amount, _paymentToken, _price);
+        emit Mint(_to, _amount);
     }
 
-    function mintWithDynamic(address _to, uint256 _amount, address _paymentToken)
-        public 
-        whenNotPaused
+    function burn(uint256 value) public virtual override {
+        revert DisabledDefaultBurn();
+    }
+
+    function burn(address _from, uint256 value) public virtual {
+        if(_msgSender() != factory) revert UnauthorizedFactory();
+
+        _burn(_from, value);
+    }
+
+    // The following functions are overrides required by Solidity.
+    function _update(address _from, address _to, uint256 _value)
+        internal
+        override(ERC20, ERC20Pausable)
     {
-        if(_amount == 0) revert InvalidParamsZeroValue();
-        if(_paymentToken == address(0)) revert InvalidParamsZeroAddress();
-
-        (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeMintWithDynamic(_to, _amount, _paymentToken, 0);
-        
-        IERC20(_token).safeTransferFrom(_to, address(this), _price);
-        _mint(_to, _amount);
-
-        EnergyLogic(energyLogic).afterMintWithDynamic(_to, _amount, _paymentToken, _price);
-       
-        emit Mint(_to, _amount, _paymentToken, _price);
-    }
-
-    function _beforeTokenTransfer(address _from, address _to, uint256 _amount) 
-        internal 
-        virtual 
-        whenNotPaused
-        override(ERC20) 
-    {
-        super._beforeTokenTransfer(_from, _to, _amount);
-    }
-
-    function burn(uint256 _amount, address _paymentTokenAddress)
-        public
-    {
-        if(_amount == 0) revert InvalidParamsZeroValue();
-        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-
-        (address _token, uint256 _price) = EnergyLogic(energyLogic).beforeBurn(_msgSender(), _amount, _paymentTokenAddress);
-
-        _burn(_msgSender(), _amount);
-        IERC20(_token).safeTransfer(_msgSender(), _price);
-
-        EnergyLogic(energyLogic).afterBurn(_msgSender(), _amount, _paymentTokenAddress, _price);
-
-        emit Burn(_msgSender(), _amount, _paymentTokenAddress, _price);
-    }
-
-    function withdraw(address _erc20) 
-        public 
-        onlyOwner
-    {       
-        IERC20 _withdrawToken = IERC20(_erc20);
-        uint _balance = _withdrawToken.balanceOf(address(this));
-
-        _withdrawToken.safeTransfer(owner(), _balance);
-
-        emit Withdrawal(_balance, _erc20, block.timestamp);
+        super._update(_from, _to, _value);
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -7,17 +7,15 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { IBalancerQueries } from "@balancer-labs/v2-interfaces/contracts/standalone-utils/IBalancerQueries.sol";
 import { IVault } from "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
 import { IAsset } from "@balancer-labs/v2-interfaces/contracts/vault/IAsset.sol";
-import { IExternalWeightedMath } from "@balancer-labs/v2-interfaces/contracts/pool-weighted/IExternalWeightedMath.sol";
+import "./Energy.sol";
 
-import "hardhat/console.sol";
-
-contract EnergyLogic is Ownable{
+contract Factory is Ownable{
     using SafeERC20 for IERC20;
 
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
 
-    uint256 public maxMintAmount;
     address public energyToken;
+    uint256 public maxMintAmount;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
     mapping (address => bool) public dynamicExchangeTokens; // token address => enabled
     address[] public fixedExchangeTokens;
@@ -31,22 +29,24 @@ contract EnergyLogic is Ownable{
     error NotEnoughFunds();
     error OnlyEnergy();
 
+    event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
+    event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
+    event Withdrawal(uint amount, address erc20, uint when);
+
     constructor(
+        address _initialOwner, 
+        address _energyToken,
         uint256 _maxMint,
         address[] memory _fixedExchangeTokens, 
         uint256[] memory _fixedExchangeRates,
         address[] memory _dynamicExchangeTokens
-    ) {
+    )
+        Ownable(_initialOwner)
+    {
+        energyToken = _energyToken;
         setMaxMintAmount(_maxMint);
         setFixedExchangeRates(_fixedExchangeTokens, _fixedExchangeRates);
         setDynamicExchangeTokens(_dynamicExchangeTokens);
-    }
-
-    function setEnergyToken(address _energyToken) 
-        public 
-        onlyOwner 
-    {
-        energyToken = _energyToken;
     }
 
     function setMaxMintAmount(uint256 _maxMintAmount) 
@@ -83,75 +83,76 @@ contract EnergyLogic is Ownable{
         }
     }
 
-    function beforeMint(address _to, uint256 _amount, address _paymentToken) 
+    function mint(address _to, uint256 _amount, address _paymentTokenAddress)
         public 
-        onlyEnergy
-        returns (address, uint256)
     {
+        if(_amount == 0) revert InvalidParamsZeroValue();
         if(_amount > maxMintAmount) revert MaxMintAmount();
-        if(fixedExchangeRate[_paymentToken] == 0) revert InvalidParamsZeroValue();
-
-        uint256 _price = fixedExchangeRate[_paymentToken]*_amount;
-
-        IERC20 paymentToken = IERC20(_paymentToken);
-        if(paymentToken.allowance(_to, address(energyToken)) < _price) revert Underpaid();
-
-        return (_paymentToken, _price);
-    }
-
-    function afterMint(address _to, uint256 _amount, address _paymentToken, uint256 _price) 
-        public 
-        onlyEnergy
-    {
-    }
-
-    function beforeMintWithDynamic(address _to, uint256 _amount, address _paymentToken, uint256 _offlinePrice) 
-        public 
-        onlyEnergy
-        returns (address, uint256)
-    {
-        if(_amount > maxMintAmount) revert MaxMintAmount();
-        if(!dynamicExchangeTokens[_paymentToken]) revert InvalidParamsZeroValue();
-
-        // Ask Balancer for a price quote of HDAO/ETH and for ETH/USDC so we can know the current HDAO USDC price from balancer.
-        uint256 _price = getPrice(_amount, _paymentToken);
-
-        // Compare the previous price with the provided as a param (the "offchain" price).
-        // If these two prices deviates by a given percentage then the process is aborted.
-        uint256 acceptedDeviationPercentage = 10; // 10%
-        if(_price*((100+acceptedDeviationPercentage)/100) > _offlinePrice || _price*((100-acceptedDeviationPercentage)/100) < _offlinePrice) revert InvalidParams();
-
-        return (_paymentToken, _price);
-    }
-
-    function afterMintWithDynamic(address _to, uint256 _amount, address _paymentToken, uint256 _price) 
-        public 
-        onlyEnergy
-    {
-        // Transfer to this contract the _price of _paymentToken from energyContract
-
-        // Swap the payment token to whatever wanted
-    }
-
-    function beforeBurn(address _to, uint256 _amount, address  _paymentTokenAddress) 
-        public 
-        view
-        onlyEnergy
-        returns (address, uint256)
-    {
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
 
         uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
         IERC20 _paymentToken = IERC20(_paymentTokenAddress);
-        if(_paymentToken.balanceOf(energyToken) < _price) revert NotEnoughFunds();
+        if(_paymentToken.allowance(_to, address(this)) < _price) revert Underpaid();
 
-        return (address(_paymentToken), _price);
+        _paymentToken.safeTransferFrom(_to, address(this), _price);
+        Energy(energyToken).mint(_to, _amount);
+
+        emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
-    function afterBurn(address _to, uint256 _amount, address  _paymentTokenAddress, uint256 _price) 
+    function mintWithDynamic(address _to, uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice)
         public 
-        onlyEnergy
-    {   
+    {
+        if(_to == address(0)) revert InvalidParamsZeroAddress();
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_amount > maxMintAmount) revert MaxMintAmount();
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
+        if(!dynamicExchangeTokens[_paymentTokenAddress]) revert InvalidParamsZeroValue();
+
+        // Ask Balancer for a price quote of HDAO/ETH and for ETH/USDC so we can know the current HDAO USDC price from balancer.
+        uint256 _price = getPrice(_amount, _paymentTokenAddress);
+
+        // Compare the previous price with the provided as a param (the "offchain" price).
+        // If these two prices deviates by a given percentage then the process is aborted.
+        uint256 acceptedDeviationPercentage = 10; // 10% // TODO: This should be configurable
+        if(_price*((100+acceptedDeviationPercentage)/100) > _offlinePrice || _price*((100-acceptedDeviationPercentage)/100) < _offlinePrice) revert InvalidParams();
+
+        IERC20(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
+        Energy(energyToken).mint(_to, _amount);
+
+        // Transfer to this contract the _price of _paymentToken from energyContract
+        // Swap the payment token to whatever wanted
+       
+        emit Mint(_to, _amount, _paymentTokenAddress, _price);
+    }
+
+    function burn(uint256 _amount, address  _paymentTokenAddress) public virtual {
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
+        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
+
+        address _from = _msgSender();
+        uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
+        IERC20 _paymentToken = IERC20(_paymentTokenAddress);
+        if(_paymentToken.balanceOf(address(this)) < _price) revert NotEnoughFunds();
+
+        Energy(energyToken).burn(_from, _amount);
+        _paymentToken.safeTransfer(_from, _price);
+
+        emit Burn(_from, _amount, _paymentTokenAddress, _price);
+    }
+
+    function withdraw(address _erc20) 
+        public 
+        onlyOwner
+    {       
+        IERC20 _withdrawToken = IERC20(_erc20);
+        uint _balance = _withdrawToken.balanceOf(address(this));
+
+        _withdrawToken.safeTransfer(owner(), _balance);
+
+        emit Withdrawal(_balance, _erc20, block.timestamp);
     }
 
     function getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
@@ -192,10 +193,5 @@ contract EnergyLogic is Ownable{
         uint256 _ethPrice = getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
         uint256 _HDAOUSDCPrice = (_hdaoPrice*_ethPrice) / 10**18;
         return  _amount * 26 * 10**17 / _HDAOUSDCPrice;
-    }
-
-    modifier onlyEnergy() {
-        if(energyToken != _msgSender()) revert OnlyEnergy();
-        _;
     }
 }
