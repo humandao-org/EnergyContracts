@@ -1,22 +1,29 @@
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
-import { TransactionRequest } from "ethers";
+import { TransactionRequest, encodeBytes32String } from "ethers";
 import { ethers, network } from "hardhat";
 import { Energy, Factory, IERC20, IERC20Metadata } from "../typechain-types";
 
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
 const BINANCE_WALLET_ADDRESS_2 = '0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245'; // This might stop working at some point (if they move their funds)
 const HDAO_HOLDER_WALLET_ADDRESS = '0x08c724340c1438fe5e20b84ba9cac89a20144414'; // This might stop working at some point (if they move their funds)
+const BAL_HOLDER_WALLET_ADDRESS = '0x8832924854e3cedb0a6abf372e6ccff9f7654332'; // This might stop working at some point (if they move their funds)
 const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
 const WETH_ADDRESS = '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619';
-const AAVE_ADDRESS = '0xD6DF932A45C0f255f85145f286eA0b292B21C90B';
+const BAL_ADDRESS = '0x9a71012b13ca4d3d0cdc72a177df3ef03b0e76a3';
 const HDAO_ADDRESS = '0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88';
 
 const fixedExchangeRates = [
     { address: USDC_ADDRESS, amount: 4 },
-    { address: USDT_ADDRESS, amount: 2 }];
+    { address: USDT_ADDRESS, amount: 2 },
+];
+
+const dynamicExchangeTokens = [
+    { address: HDAO_ADDRESS, pool: '0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137' },
+    { address: BAL_ADDRESS, pool: '0x3d468ab2329f296e1b9d8476bb54dd77d8c2320f000200000000000000000426' },
+];
 
 let energyContract: Energy;
 let factoryContract: Factory;
@@ -24,6 +31,7 @@ let usdcContract: IERC20Metadata;
 let usdtContract: IERC20Metadata;
 let wethContract: IERC20Metadata;
 let hdaoContract: IERC20Metadata;
+let balContract: IERC20Metadata;
 
 describe("Energy Factory", async () => {
     before(async () => {
@@ -53,6 +61,7 @@ describe("Energy Factory", async () => {
         usdtContract = await ethers.getContractAt("IERC20Metadata", USDT_ADDRESS);
         wethContract = await ethers.getContractAt("IERC20Metadata", WETH_ADDRESS);
         hdaoContract = await ethers.getContractAt("IERC20Metadata", HDAO_ADDRESS);
+        balContract = await ethers.getContractAt("IERC20Metadata", BAL_ADDRESS);
 
         // Deploying Energy Token
         const contractFactory = await ethers.getContractFactory("Energy");
@@ -69,7 +78,8 @@ describe("Energy Factory", async () => {
             BigInt("3000"),
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount),
-            [HDAO_ADDRESS, WETH_ADDRESS, AAVE_ADDRESS]
+            dynamicExchangeTokens.map(a => a.address),
+            dynamicExchangeTokens.map(a => a.pool)
         );
 
         // Setting Factory
@@ -79,20 +89,31 @@ describe("Energy Factory", async () => {
         await network.provider.request({ method: "hardhat_impersonateAccount", params: [BINANCE_WALLET_ADDRESS]});
         await network.provider.request({ method: "hardhat_impersonateAccount", params: [BINANCE_WALLET_ADDRESS_2]});
         await network.provider.request({ method: "hardhat_impersonateAccount", params: [HDAO_HOLDER_WALLET_ADDRESS]});
+        await network.provider.request({ method: "hardhat_impersonateAccount", params: [BAL_HOLDER_WALLET_ADDRESS]});
         const binanceSigner = await ethers.getSigner(BINANCE_WALLET_ADDRESS);
         const binanceSigner2 = await ethers.getSigner(BINANCE_WALLET_ADDRESS_2);
         const hdaoSigner = await ethers.getSigner(HDAO_HOLDER_WALLET_ADDRESS);
+        const balSigner = await ethers.getSigner(BAL_HOLDER_WALLET_ADDRESS);
+        
+        await owner.sendTransaction({ to: BINANCE_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
+        await owner.sendTransaction({ to: BINANCE_WALLET_ADDRESS_2, value: ethers.parseEther("1.0") });
+        await owner.sendTransaction({ to: HDAO_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
+        await owner.sendTransaction({ to: BAL_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
 
         const usdcAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 100000 USDC
         const usdtAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 100000 USDT
         const wethAmount: bigint = BigInt(100) * BigInt(10)**await wethContract.decimals(); // 100 WETH
-        const hdaoAmount: bigint = BigInt(1000000) * BigInt(10)**await wethContract.decimals(); // 1000000 HDAO
+        const hdaoAmount: bigint = BigInt(1000000) * BigInt(10)**await hdaoContract.decimals(); // 1000000 HDAO
+        const balAmount: bigint = BigInt(10000) * BigInt(10)**await balContract.decimals(); // 10000 BAL
         await usdcContract.connect(binanceSigner2).transfer(owner.address, usdcAmount)
         await usdtContract.connect(binanceSigner2).transfer(owner.address, usdtAmount)
         await wethContract.connect(binanceSigner).transfer(owner.address, wethAmount)
         await hdaoContract.connect(hdaoSigner).transfer(owner.address, hdaoAmount)
+        await balContract.connect(balSigner).transfer(owner.address, balAmount)
         expect(await usdcContract.balanceOf(owner.address)).to.be.equal(usdcAmount);
         expect(await usdtContract.balanceOf(owner.address)).to.be.equal(usdtAmount);
+        expect(await hdaoContract.balanceOf(owner.address)).to.be.equal(hdaoAmount);
+        expect(await balContract.balanceOf(owner.address)).to.be.equal(balAmount);
         await usdcContract.connect(binanceSigner2).transfer(alice.address, usdcAmount)
         await usdtContract.connect(binanceSigner2).transfer(alice.address, usdtAmount)
         expect(await usdcContract.balanceOf(alice.address)).to.be.equal(usdcAmount);
@@ -151,22 +172,27 @@ describe("Energy Factory", async () => {
             await expect(factoryContract.setFixedExchangeRates([USDC_ADDRESS], [0])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
         });
 
-         it("Should be able to set the Dynamic Exchange Rates", async () => {
+        it("Should be able to set the Dynamic Exchange Rates", async () => {
             const { alice, bob } = await loadFixture(deployFixture);
 
-            const testDynamicExchangeRates = [alice.address, bob.address];
-            await factoryContract.setDynamicExchangeTokens(testDynamicExchangeRates);
-            expect(await factoryContract.dynamicExchangeTokens(alice.address)).to.be.true;
-            expect(await factoryContract.dynamicExchangeTokens(bob.address)).to.be.true;
+            const testDynamicExchangeTokens = [
+                { address: alice.address, pool: '0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137' },
+                { address: bob.address, pool: '0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24' },
+            ];
+
+            await factoryContract.setDynamicExchangeTokens(testDynamicExchangeTokens.map(a => a.address), testDynamicExchangeTokens.map(a => a.pool));
+            expect(await factoryContract.dynamicExchangeTokens(alice.address)).to.be.equal('0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137');
+            expect(await factoryContract.dynamicExchangeTokens(bob.address)).to.be.equal('0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24');
 
             // ERRORS
-            await expect(factoryContract.connect(alice).setDynamicExchangeTokens([ethers.ZeroAddress])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setDynamicExchangeTokens([])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
-            await expect(factoryContract.setDynamicExchangeTokens([ethers.ZeroAddress])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
+            await expect(factoryContract.connect(alice).setDynamicExchangeTokens([ethers.ZeroAddress],[])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+            await expect(factoryContract.setDynamicExchangeTokens([],[])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
+            await expect(factoryContract.setDynamicExchangeTokens([ethers.ZeroAddress],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
+            await expect(factoryContract.setDynamicExchangeTokens([bob.address],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
         });
 
         it("Should be able to set the Dynamic Exchange Price Deviation", async () => {
-            const { alice, bob } = await loadFixture(deployFixture);
+            const { alice } = await loadFixture(deployFixture);
             const percentage = 3;
             await factoryContract.setDynamicExchangeAcceptedDeviationPercentage(percentage);
             expect(await factoryContract.dynamicExchangeAcceptedDeviationPercentage()).to.be.equal(percentage);
@@ -210,19 +236,19 @@ describe("Energy Factory", async () => {
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
         });
 
-        it("Should be able to mint using dynamic token pricing", async () => {
+        it("Should be able to mint using dynamic token pricing using HDAO", async () => {
             const { owner } = await loadFixture(deployFixture);
             const enrgAmount = BigInt(100);
             const expectedUSDCSwap = BigInt(200) * BigInt(10)**await usdcContract.decimals();
 
             // Find out the minting price
-            const data = factoryContract.interface.encodeFunctionData("getPriceInHDAO", [enrgAmount]);
+            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
             const tx: TransactionRequest = {
                 to: await factoryContract.getAddress(),
                 data: data
             }
             const res = await owner.call(tx);
-            const decoded = factoryContract.interface.decodeFunctionResult("getPriceInHDAO", res);
+            const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
             const price = BigInt(decoded.toString());
 
             // Aprove the payment token for the price amount
@@ -238,6 +264,35 @@ describe("Energy Factory", async () => {
             expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedHDAOKept, 10000000);
             expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 10000000);
         });
+
+        it("Should be able to mint using dynamic token pricing using BAL", async () => {
+            const { owner } = await loadFixture(deployFixture);
+
+            const enrgAmount = BigInt(100);
+            const expectedUSDCSwap = BigInt(200) * BigInt(10)**await usdcContract.decimals();
+
+            // Find out the minting price
+            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, BAL_ADDRESS]);
+            const tx: TransactionRequest = {
+                to: await factoryContract.getAddress(),
+                data: data
+            }
+            const res = await owner.call(tx);
+            const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
+            const price = BigInt(decoded.toString());
+
+            // Aprove the payment token for the price amount
+            await balContract.approve(await factoryContract.getAddress(), price);
+
+            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, BAL_ADDRESS, price))
+                .to.emit(factoryContract, "Mint");
+
+            expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
+
+            // Expecting 23% to be kept in HDAO the rest in USDC
+            expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.greaterThan(0);
+            expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 10000000);
+        });
     });
 
     describe("Dynamic Exchange Rates", () => {
@@ -245,13 +300,13 @@ describe("Energy Factory", async () => {
             const { alice } = await loadFixture(deployFixture);
             const enrgAmount = BigInt(100);
 
-            const data = factoryContract.interface.encodeFunctionData("getPriceInHDAO", [enrgAmount]);
+            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
             const tx: TransactionRequest = {
                 to: await factoryContract.getAddress(),
                 data: data
             }
             const res = await alice.call(tx);
-            const decoded = factoryContract.interface.decodeFunctionResult("getPriceInHDAO", res);
+            const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
 
             expect(+(decoded.toString())).to.be.greaterThan(0);
         });

@@ -14,15 +14,20 @@ import "hardhat/console.sol";
 contract Factory is Ownable{
     using SafeERC20 for IERC20;
 
+    address immutable HDAO_TOKEN_ADDRESS = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
+    address immutable USDC_TOKEN_ADDRESS = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
+    address immutable WETH_TOKEN_ADDRESS = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
+    bytes32 immutable USDCWETH_POOLID = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
+    bytes32 immutable HDAOWETH_POOLID = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
 
     address public energyToken;
     uint256 public maxMintAmount;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
-    mapping (address => bool) public dynamicExchangeTokens; // token address => enabled
+    mapping (address => bytes32) public dynamicExchangeTokens; // token address => WETH-Token Balancer pool id
     address[] public fixedExchangeTokens;
-    uint256 public dynamicExchangeAcceptedDeviationPercentage;
+    uint8 public dynamicExchangeAcceptedDeviationPercentage;
 
     error InvalidParams();
     error InvalidParamsLength();
@@ -32,6 +37,7 @@ contract Factory is Ownable{
     error Underpaid();
     error NotEnoughFunds();
     error OnlyEnergy();
+    error UnacceptablePriceDeviation();
 
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
@@ -43,14 +49,15 @@ contract Factory is Ownable{
         uint256 _maxMint,
         address[] memory _fixedExchangeTokens, 
         uint256[] memory _fixedExchangeRates,
-        address[] memory _dynamicExchangeTokens
+        address[] memory _dynamicExchangeTokens,
+        bytes32[] memory _dynamicExchangePools
     )
         Ownable(_initialOwner)
     {
         energyToken = _energyToken;
         setMaxMintAmount(_maxMint);
         setFixedExchangeRates(_fixedExchangeTokens, _fixedExchangeRates);
-        setDynamicExchangeTokens(_dynamicExchangeTokens);
+        setDynamicExchangeTokens(_dynamicExchangeTokens, _dynamicExchangePools);
         dynamicExchangeAcceptedDeviationPercentage = 10;
     }
 
@@ -59,6 +66,7 @@ contract Factory is Ownable{
         onlyOwner 
     {
         if(_maxMintAmount == 0) revert InvalidParamsZeroValue();
+
         maxMintAmount = _maxMintAmount;
     }
 
@@ -76,23 +84,27 @@ contract Factory is Ownable{
         }
     }
 
-    function setDynamicExchangeTokens(address[] memory _dynamicExchangeTokens) 
+    function setDynamicExchangeTokens(address[] memory _dynamicExchangeTokens, bytes32[] memory _dynamicExchangePools) 
         public 
         onlyOwner 
     {
         if(_dynamicExchangeTokens.length == 0) revert InvalidParamsLength();
+        if(_dynamicExchangePools.length == 0) revert InvalidParamsLength();
+        if(_dynamicExchangeTokens.length != _dynamicExchangePools.length) revert InvalidParamsLength();
 
         for(uint8 i = 0; i < _dynamicExchangeTokens.length; i++) {
             if(_dynamicExchangeTokens[i] == address(0)) revert InvalidParamsZeroAddress();
-            dynamicExchangeTokens[_dynamicExchangeTokens[i]] = true;
+            if(_dynamicExchangePools[i] == 0) revert InvalidParamsZeroValue();
+            dynamicExchangeTokens[_dynamicExchangeTokens[i]] = _dynamicExchangePools[i];
         }
     }
 
-    function setDynamicExchangeAcceptedDeviationPercentage(uint256 _dynamicExchangeAcceptedDeviationPercentage) 
+    function setDynamicExchangeAcceptedDeviationPercentage(uint8 _dynamicExchangeAcceptedDeviationPercentage) 
         public 
         onlyOwner 
     {
         if(_dynamicExchangeAcceptedDeviationPercentage == 0) revert InvalidParamsZeroValue();
+
         dynamicExchangeAcceptedDeviationPercentage = _dynamicExchangeAcceptedDeviationPercentage;
     }
 
@@ -121,22 +133,21 @@ contract Factory is Ownable{
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_amount > maxMintAmount) revert MaxMintAmount();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-        if(!dynamicExchangeTokens[_paymentTokenAddress]) revert InvalidParamsZeroValue();
+        if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
 
-        // Ask Balancer for a price quote of HDAO/ETH and for ETH/USDC so we can know the current HDAO USDC price from balancer.
-        uint256 _price = getPriceInHDAO(_amount);
+        // Ask Balancer for a price quote of TOKEN/ETH and for ETH/USDC so we can know the current TOKEN USDC price from balancer.
+        uint256 _price = getPrice(_amount, _paymentTokenAddress);
 
         // Compare the price with the provided as "offchain" price, if deviates, abort
         uint256 deviation = _price*dynamicExchangeAcceptedDeviationPercentage/100;
         if(_price+deviation < _offlinePrice 
-            || _price-deviation > _offlinePrice) revert InvalidParams();
+            || _price-deviation > _offlinePrice) revert UnacceptablePriceDeviation();
 
         // Transfer to the _price of _paymentToken and mint
         IERC20(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
-        // Swap some (77%, $2 for every $2.6) $HDAO to USDC
-        _swapHDAOtoUSDC(_price*77/100);
+        _swapPaymentTokenToHDAOAndUSDC(_price, _paymentTokenAddress);
 
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
@@ -169,24 +180,20 @@ contract Factory is Ownable{
         emit Withdrawal(_balance, _erc20, block.timestamp);
     }
 
-    // Calculates the price of the amount of energy in the payment token
-    function getPriceInHDAO(uint256 _amount) 
+    // Calculates the price for the amount of energy in the payment token
+    function getPrice(uint256 _amount, address _paymentTokenAddress)
         public 
         returns (uint256)
     {
         if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
+        if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
 
-        bytes32 _poolId_usdceth = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
-        address _weth = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
-        address _usdc = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
-        bytes32 _poolId_hdaoeth = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
-        address _hdao = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
+        uint256 _tokenPrice = _getSwapPrice(1 * 10**18, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
+        uint256 _ethPrice = _getSwapPrice(1 * 10**18, USDCWETH_POOLID, WETH_TOKEN_ADDRESS, USDC_TOKEN_ADDRESS) * 10**12; // USDC has only 6 decimals, we need to add some 0s
+        uint256 _tokenUSDCPrice = (_tokenPrice*_ethPrice) / 10**18;
 
-        uint256 _hdaoPrice = _getSwapPrice(1 * 10**18, _poolId_hdaoeth, _hdao, _weth);
-        uint256 _ethPrice = _getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
-        uint256 _HDAOUSDCPrice = (_hdaoPrice*_ethPrice) / 10**18;
-
-        return  (_amount * 26 * 10**17 / _HDAOUSDCPrice) * 10**18;
+        return  (_amount * 26 * 10**17 / _tokenUSDCPrice) * 10**18;
     }
 
     function _getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
@@ -217,29 +224,37 @@ contract Factory is Ownable{
         return BalancerQueries.querySwap(_singleSwap, _funds);
     }
 
-    function _swapHDAOtoUSDC(uint256 _amount)
+
+    function _swapPaymentTokenToHDAOAndUSDC(uint256 _totalAmount, address _token)
         private
     {
-        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_totalAmount == 0) revert InvalidParamsZeroValue();
+        
+        // Swap some (77%, $2 for every $2.6) $HDAO to USDC
+        uint256 _amount = _totalAmount*77/100;
 
-        bytes32 _poolId_usdceth = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
-        address _weth = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
-        address _usdc = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
-        bytes32 _poolId_hdaoeth = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
-        address _hdao = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
+        if(_token != HDAO_TOKEN_ADDRESS){
+            _swapPaymentTokens(_totalAmount-_amount, _token, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+        }
 
-        IERC20(_hdao).approve(address(BalancerVault), _amount);
+        _swapPaymentTokens(_amount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
+    }
+
+    function _swapPaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
+        private
+    {
+        IERC20(_paymentToken).approve(address(BalancerVault), _amount);
 
         IVault.BatchSwapStep[] memory _swaps = new IVault.BatchSwapStep[](2);
         _swaps[0] = IVault.BatchSwapStep({
-            poolId: _poolId_hdaoeth,
+            poolId: dynamicExchangeTokens[_paymentToken],
             assetInIndex: 0,
             assetOutIndex: 1,
             amount: _amount,
             userData: new bytes(0)
         });
         _swaps[1] = IVault.BatchSwapStep({
-            poolId: _poolId_usdceth,
+            poolId: _poolOut,
             assetInIndex: 1,
             assetOutIndex: 2,
             amount: 0,
@@ -247,9 +262,9 @@ contract Factory is Ownable{
         });
 
         IAsset[] memory _assets = new IAsset[](3);
-        _assets[0] = IAsset(_hdao);
-        _assets[1] = IAsset(_weth);
-        _assets[2] = IAsset(_usdc);
+        _assets[0] = IAsset(_paymentToken);
+        _assets[1] = IAsset(WETH_TOKEN_ADDRESS);
+        _assets[2] = IAsset(_assetOut);
 
         IVault.FundManagement memory _funds = IVault.FundManagement({
             sender: address(this),
