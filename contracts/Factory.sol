@@ -9,6 +9,8 @@ import { IVault } from "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol"
 import { IAsset } from "@balancer-labs/v2-interfaces/contracts/vault/IAsset.sol";
 import "./Energy.sol";
 
+import "hardhat/console.sol";
+
 contract Factory is Ownable{
     using SafeERC20 for IERC20;
 
@@ -19,6 +21,7 @@ contract Factory is Ownable{
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
     mapping (address => bool) public dynamicExchangeTokens; // token address => enabled
     address[] public fixedExchangeTokens;
+    uint256 public dynamicExchangeAcceptedDeviationPercentage;
 
     error InvalidParams();
     error InvalidParamsLength();
@@ -47,6 +50,7 @@ contract Factory is Ownable{
         setMaxMintAmount(_maxMint);
         setFixedExchangeRates(_fixedExchangeTokens, _fixedExchangeRates);
         setDynamicExchangeTokens(_dynamicExchangeTokens);
+        dynamicExchangeAcceptedDeviationPercentage = 10;
     }
 
     function setMaxMintAmount(uint256 _maxMintAmount) 
@@ -83,6 +87,14 @@ contract Factory is Ownable{
         }
     }
 
+    function setDynamicExchangeAcceptedDeviationPercentage(uint256 _dynamicExchangeAcceptedDeviationPercentage) 
+        public 
+        onlyOwner 
+    {
+        if(_dynamicExchangeAcceptedDeviationPercentage == 0) revert InvalidParamsZeroValue();
+        dynamicExchangeAcceptedDeviationPercentage = _dynamicExchangeAcceptedDeviationPercentage;
+    }
+
     function mint(address _to, uint256 _amount, address _paymentTokenAddress)
         public 
     {
@@ -111,17 +123,18 @@ contract Factory is Ownable{
         if(!dynamicExchangeTokens[_paymentTokenAddress]) revert InvalidParamsZeroValue();
 
         // Ask Balancer for a price quote of HDAO/ETH and for ETH/USDC so we can know the current HDAO USDC price from balancer.
-        uint256 _price = getPrice(_amount, _paymentTokenAddress);
+        uint256 _price = getPriceInHDAO(_amount);
 
         // Compare the previous price with the provided as a param (the "offchain" price).
         // If these two prices deviates by a given percentage then the process is aborted.
-        uint256 acceptedDeviationPercentage = 10; // 10% // TODO: This should be configurable
-        if(_price*((100+acceptedDeviationPercentage)/100) > _offlinePrice || _price*((100-acceptedDeviationPercentage)/100) < _offlinePrice) revert InvalidParams();
+        uint256 deviation = _price*dynamicExchangeAcceptedDeviationPercentage/100;
+        if(_price+deviation < _offlinePrice 
+            || _price-deviation > _offlinePrice) revert InvalidParams();
 
+        // Transfer to the _price of _paymentToken and mint
         IERC20(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
-        // Transfer to this contract the _price of _paymentToken from energyContract
         // Swap the payment token to whatever wanted
        
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
@@ -155,8 +168,8 @@ contract Factory is Ownable{
         emit Withdrawal(_balance, _erc20, block.timestamp);
     }
 
-    function getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
-        public 
+    function _getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
+        private
         returns (uint256)
     {       
         IVault.SingleSwap memory _singleSwap = IVault.SingleSwap({
@@ -179,7 +192,7 @@ contract Factory is Ownable{
     }
    
     // Calculates the price of the amount of energy in the payment token
-    function getPrice(uint256 _amount, address _paymentToken) 
+    function getPriceInHDAO(uint256 _amount) 
         public 
         returns (uint256)
     {
@@ -189,8 +202,8 @@ contract Factory is Ownable{
         bytes32 _poolId_hdaoeth = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
         address _hdao = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
 
-        uint256 _hdaoPrice = getSwapPrice(1 * 10**18, _poolId_hdaoeth, _hdao, _weth);
-        uint256 _ethPrice = getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
+        uint256 _hdaoPrice = _getSwapPrice(1 * 10**18, _poolId_hdaoeth, _hdao, _weth);
+        uint256 _ethPrice = _getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
         uint256 _HDAOUSDCPrice = (_hdaoPrice*_ethPrice) / 10**18;
         return  _amount * 26 * 10**17 / _HDAOUSDCPrice;
     }
