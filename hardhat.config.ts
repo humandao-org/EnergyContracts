@@ -24,6 +24,7 @@ const config: HardhatUserConfig = {
         initialIndex: 0,
         count: 20,
         passphrase: "",
+        accountsBalance: "10000000000000000000000000",
       },
     },
   },

@@ -15,6 +15,7 @@ contract Factory is Ownable{
     using SafeERC20 for IERC20;
 
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
+    IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
 
     address public energyToken;
     uint256 public maxMintAmount;
@@ -125,8 +126,7 @@ contract Factory is Ownable{
         // Ask Balancer for a price quote of HDAO/ETH and for ETH/USDC so we can know the current HDAO USDC price from balancer.
         uint256 _price = getPriceInHDAO(_amount);
 
-        // Compare the previous price with the provided as a param (the "offchain" price).
-        // If these two prices deviates by a given percentage then the process is aborted.
+        // Compare the price with the provided as "offchain" price, if deviates, abort
         uint256 deviation = _price*dynamicExchangeAcceptedDeviationPercentage/100;
         if(_price+deviation < _offlinePrice 
             || _price-deviation > _offlinePrice) revert InvalidParams();
@@ -135,8 +135,9 @@ contract Factory is Ownable{
         IERC20(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
-        // Swap the payment token to whatever wanted
-       
+        // Swap some (77%, $2 for every $2.6) $HDAO to USDC
+        _swapHDAOtoUSDC(_price*77/100);
+
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
@@ -168,10 +169,35 @@ contract Factory is Ownable{
         emit Withdrawal(_balance, _erc20, block.timestamp);
     }
 
+    // Calculates the price of the amount of energy in the payment token
+    function getPriceInHDAO(uint256 _amount) 
+        public 
+        returns (uint256)
+    {
+        if(_amount == 0) revert InvalidParamsZeroValue();
+
+        bytes32 _poolId_usdceth = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
+        address _weth = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
+        address _usdc = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
+        bytes32 _poolId_hdaoeth = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
+        address _hdao = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
+
+        uint256 _hdaoPrice = _getSwapPrice(1 * 10**18, _poolId_hdaoeth, _hdao, _weth);
+        uint256 _ethPrice = _getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
+        uint256 _HDAOUSDCPrice = (_hdaoPrice*_ethPrice) / 10**18;
+
+        return  (_amount * 26 * 10**17 / _HDAOUSDCPrice) * 10**18;
+    }
+
     function _getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
         private
         returns (uint256)
     {       
+        if(_amount == 0) revert InvalidParamsZeroValue();
+        if(_poolId == bytes32(0)) revert InvalidParamsZeroValue();
+        if(_tokenIn == address(0)) revert InvalidParamsZeroAddress();
+        if(_tokenOut == address(0)) revert InvalidParamsZeroAddress();
+
         IVault.SingleSwap memory _singleSwap = IVault.SingleSwap({
             poolId: _poolId,
             kind: IVault.SwapKind.GIVEN_IN,
@@ -190,21 +216,60 @@ contract Factory is Ownable{
 
         return BalancerQueries.querySwap(_singleSwap, _funds);
     }
-   
-    // Calculates the price of the amount of energy in the payment token
-    function getPriceInHDAO(uint256 _amount) 
-        public 
-        returns (uint256)
+
+    function _swapHDAOtoUSDC(uint256 _amount)
+        private
     {
+        if(_amount == 0) revert InvalidParamsZeroValue();
+
         bytes32 _poolId_usdceth = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
         address _weth = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
         address _usdc = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
         bytes32 _poolId_hdaoeth = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
         address _hdao = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
 
-        uint256 _hdaoPrice = _getSwapPrice(1 * 10**18, _poolId_hdaoeth, _hdao, _weth);
-        uint256 _ethPrice = _getSwapPrice(1 * 10**18, _poolId_usdceth, _weth, _usdc) * 10**12; // USDC has only 6 decimals, we need to add some 0s
-        uint256 _HDAOUSDCPrice = (_hdaoPrice*_ethPrice) / 10**18;
-        return  _amount * 26 * 10**17 / _HDAOUSDCPrice;
+        IERC20(_hdao).approve(address(BalancerVault), _amount);
+
+        IVault.BatchSwapStep[] memory _swaps = new IVault.BatchSwapStep[](2);
+        _swaps[0] = IVault.BatchSwapStep({
+            poolId: _poolId_hdaoeth,
+            assetInIndex: 0,
+            assetOutIndex: 1,
+            amount: _amount,
+            userData: new bytes(0)
+        });
+        _swaps[1] = IVault.BatchSwapStep({
+            poolId: _poolId_usdceth,
+            assetInIndex: 1,
+            assetOutIndex: 2,
+            amount: 0,
+            userData: new bytes(0)
+        });
+
+        IAsset[] memory _assets = new IAsset[](3);
+        _assets[0] = IAsset(_hdao);
+        _assets[1] = IAsset(_weth);
+        _assets[2] = IAsset(_usdc);
+
+        IVault.FundManagement memory _funds = IVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(address(this)),
+            toInternalBalance: false
+        });
+
+        int256[] memory _limits = new int256[](3);
+        _limits[0] = type(int256).max;
+        _limits[1] = type(int256).max;
+        _limits[2] = type(int256).max;
+
+        BalancerVault.batchSwap(
+            IVault.SwapKind.GIVEN_IN,
+            _swaps,
+            _assets,
+            _funds,
+            _limits,
+            type(uint256).max
+        );
     }
 }
