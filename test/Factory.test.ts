@@ -210,17 +210,17 @@ describe("Energy Factory", async () => {
             const amount = BigInt(100);
             expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(0);
             const price = await approvePaymentToken(amount, usdcContract);
-            await expect(factoryContract.mint(owner.address, amount, USDC_ADDRESS))
+            await expect(factoryContract.mint(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Mint")
                 .withArgs(owner.address, amount, USDC_ADDRESS, price);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
             expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price);
 
             // Errors
-            await expect(factoryContract.mint(owner.address, 0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            await expect(factoryContract.mint(owner.address, amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
-            await expect(factoryContract.mint(owner.address, amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            await expect(factoryContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
+            await expect(factoryContract.mint(0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+            await expect(factoryContract.mint(amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
+            await expect(factoryContract.mint(amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+            await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
         });
 
         it("Should not be able to mint if paused", async () => {
@@ -229,10 +229,10 @@ describe("Energy Factory", async () => {
             const amount = BigInt(100);
             await approvePaymentToken(amount, usdcContract);
             await energyContract.pause();
-            await expect(factoryContract.mint(owner.address, amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "EnforcedPause");
+            await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "EnforcedPause");
 
             await energyContract.unpause();
-            await factoryContract.mint(owner.address, amount, USDC_ADDRESS);
+            await factoryContract.mint(amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
         });
 
@@ -257,7 +257,7 @@ describe("Energy Factory", async () => {
             const messageHash = ethers.solidityPackedKeccak256(['uint256'], [price]);
             const signature = await owner.signMessage(ethers.getBytes(messageHash));
             
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, HDAO_ADDRESS, price, signature))
+            await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price, signature))
                 .to.emit(factoryContract, "Mint");
 
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
@@ -269,12 +269,11 @@ describe("Energy Factory", async () => {
 
             // ERRORS
             const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, HDAO_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
-            await expect(factoryContract.mintWithDynamic(ethers.ZeroAddress, enrgAmount, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(owner.address, 0, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-            await expect(factoryContract.mintWithDynamic(owner.address, (await factoryContract.maxMintAmount())+BigInt(1), HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+            await expect(factoryContract.mintWithDynamic(0, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
         });
 
         it("Should be able to mint using dynamic token pricing using BAL", async () => {
@@ -299,7 +298,7 @@ describe("Energy Factory", async () => {
             // Aprove the payment token for the price amount
             await balContract.approve(await factoryContract.getAddress(), price);
 
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, BAL_ADDRESS, price, signature))
+            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, signature))
                 .to.emit(factoryContract, "Mint");
 
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
@@ -310,12 +309,11 @@ describe("Energy Factory", async () => {
 
             // ERRORS
             const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, BAL_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
-            await expect(factoryContract.mintWithDynamic(ethers.ZeroAddress, enrgAmount, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(owner.address, 0, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-            await expect(factoryContract.mintWithDynamic(owner.address, (await factoryContract.maxMintAmount())+BigInt(1), BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(owner.address, enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+            await expect(factoryContract.mintWithDynamic(0, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+            await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
         });
     });
 
@@ -342,7 +340,7 @@ describe("Energy Factory", async () => {
 
             const amount = BigInt(100);
             const price = await approvePaymentToken(amount, usdcContract);
-            await factoryContract.mint(owner.address, amount, USDC_ADDRESS);
+            await factoryContract.mint(amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
             expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price);
 
@@ -362,10 +360,10 @@ describe("Energy Factory", async () => {
             const amountAlice = amountOwner/BigInt(4);
 
             const priceUSDT = await approvePaymentToken(amountOwner, usdtContract);
-            await factoryContract.mint(owner.address, amountOwner, USDT_ADDRESS);
+            await factoryContract.mint(amountOwner, USDT_ADDRESS);
 
             const priceUSDC = await approvePaymentToken(amountAlice, usdcContract, alice);
-            await factoryContract.connect(alice).mint(alice.address, amountAlice, USDC_ADDRESS);
+            await factoryContract.connect(alice).mint(amountAlice, USDC_ADDRESS);
 
             const ownerUsdtBefore = await usdtContract.balanceOf(owner.address);
             const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
@@ -396,7 +394,7 @@ describe("Energy Factory", async () => {
             const amount = BigInt(100);
             const price = await approvePaymentToken(amount, usdcContract);
 
-            await factoryContract.mint(owner.address, amount, USDC_ADDRESS);
+            await factoryContract.mint(amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
 
             await energyContract.pause();
@@ -432,7 +430,7 @@ describe("Energy Factory", async () => {
 
                 const amount = BigInt(100);
                 const price = await approvePaymentToken(amount, usdcContract);
-                await factoryContract.mint(owner.address, amount, USDC_ADDRESS);
+                await factoryContract.mint(amount, USDC_ADDRESS);
 
                 const balanceBefore = await usdcContract.balanceOf(owner.address);
 

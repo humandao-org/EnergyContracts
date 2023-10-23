@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.21;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { IBalancerQueries } from "@balancer-labs/v2-interfaces/contracts/standalone-utils/IBalancerQueries.sol";
 import { IVault } from "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
@@ -13,10 +14,8 @@ import { IAsset } from "@balancer-labs/v2-interfaces/contracts/vault/IAsset.sol"
 
 import "./Energy.sol";
 
-import "hardhat/console.sol";
-
-contract Factory is Ownable{
-    using SafeERC20 for IERC20;
+contract Factory is Ownable, ReentrancyGuard{
+    using SafeERC20 for IERC20Metadata;
 
     address immutable HDAO_TOKEN_ADDRESS = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
     address immutable USDC_TOKEN_ADDRESS = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
@@ -113,16 +112,18 @@ contract Factory is Ownable{
         dynamicExchangeAcceptedDeviationPercentage = _dynamicExchangeAcceptedDeviationPercentage;
     }
 
-    function mint(address _to, uint256 _amount, address _paymentTokenAddress)
+    function mint(uint256 _amount, address _paymentTokenAddress)
         public 
+        nonReentrant
     {
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_amount > maxMintAmount) revert MaxMintAmount();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
 
+        address _to = _msgSender();
         uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
-        IERC20 _paymentToken = IERC20(_paymentTokenAddress);
+        IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
         if(_paymentToken.allowance(_to, address(this)) < _price) revert Underpaid();
 
         _paymentToken.safeTransferFrom(_to, address(this), _price);
@@ -131,14 +132,16 @@ contract Factory is Ownable{
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
-    function mintWithDynamic(address _to, uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice, bytes memory _signature)
+    function mintWithDynamic(uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice, bytes memory _signature)
         public 
+        nonReentrant
     {
-        if(_to == address(0)) revert InvalidParamsZeroAddress();
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_amount > maxMintAmount) revert MaxMintAmount();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
+
+        address _to = _msgSender();
 
         // Verify the signature
         bytes32 _hash = keccak256(abi.encodePacked(_offlinePrice));
@@ -155,7 +158,7 @@ contract Factory is Ownable{
             || _price-deviation > _offlinePrice) revert UnacceptablePriceDeviation();
 
         // Transfer to the _price of _paymentToken and mint
-        IERC20(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
+        IERC20Metadata(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
         _swapPaymentTokenToHDAOAndUSDC(_price, _paymentTokenAddress);
@@ -163,14 +166,14 @@ contract Factory is Ownable{
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
-    function burn(uint256 _amount, address  _paymentTokenAddress) public virtual {
+    function burn(uint256 _amount, address  _paymentTokenAddress) public virtual nonReentrant{
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
 
         address _from = _msgSender();
         uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
-        IERC20 _paymentToken = IERC20(_paymentTokenAddress);
+        IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
         if(_paymentToken.balanceOf(address(this)) < _price) revert NotEnoughFunds();
 
         Energy(energyToken).burn(_from, _amount);
@@ -182,8 +185,9 @@ contract Factory is Ownable{
     function withdraw(address _erc20) 
         public 
         onlyOwner
+        nonReentrant
     {       
-        IERC20 _withdrawToken = IERC20(_erc20);
+        IERC20Metadata _withdrawToken = IERC20Metadata(_erc20);
         uint _balance = _withdrawToken.balanceOf(address(this));
 
         _withdrawToken.safeTransfer(owner(), _balance);
@@ -200,7 +204,8 @@ contract Factory is Ownable{
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
 
-        uint256 _tokenPrice = _getSwapPrice(1 * 10**18, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
+        uint8 decimals = IERC20Metadata(_paymentTokenAddress).decimals();
+        uint256 _tokenPrice = _getSwapPrice(1 * 10**decimals, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
         uint256 _ethPrice = _getSwapPrice(1 * 10**18, USDCWETH_POOLID, WETH_TOKEN_ADDRESS, USDC_TOKEN_ADDRESS) * 10**12; // USDC has only 6 decimals, we need to add some 0s
         uint256 _tokenUSDCPrice = (_tokenPrice*_ethPrice) / 10**18;
 
@@ -253,8 +258,9 @@ contract Factory is Ownable{
 
     function _swapPaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
         private
+        returns (int256[] memory)
     {
-        IERC20(_paymentToken).approve(address(BalancerVault), _amount);
+        IERC20Metadata(_paymentToken).approve(address(BalancerVault), _amount);
 
         IVault.BatchSwapStep[] memory _swaps = new IVault.BatchSwapStep[](2);
         _swaps[0] = IVault.BatchSwapStep({
@@ -289,7 +295,7 @@ contract Factory is Ownable{
         _limits[1] = type(int256).max;
         _limits[2] = type(int256).max;
 
-        BalancerVault.batchSwap(
+        return BalancerVault.batchSwap(
             IVault.SwapKind.GIVEN_IN,
             _swaps,
             _assets,
