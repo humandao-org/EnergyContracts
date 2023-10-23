@@ -3,10 +3,14 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+
 import { IBalancerQueries } from "@balancer-labs/v2-interfaces/contracts/standalone-utils/IBalancerQueries.sol";
 import { IVault } from "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
 import { IAsset } from "@balancer-labs/v2-interfaces/contracts/vault/IAsset.sol";
+
 import "./Energy.sol";
 
 import "hardhat/console.sol";
@@ -38,6 +42,7 @@ contract Factory is Ownable{
     error NotEnoughFunds();
     error OnlyEnergy();
     error UnacceptablePriceDeviation();
+    error InvalidSignature();
 
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
@@ -126,7 +131,7 @@ contract Factory is Ownable{
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
-    function mintWithDynamic(address _to, uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice)
+    function mintWithDynamic(address _to, uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice, bytes memory _signature)
         public 
     {
         if(_to == address(0)) revert InvalidParamsZeroAddress();
@@ -134,6 +139,12 @@ contract Factory is Ownable{
         if(_amount > maxMintAmount) revert MaxMintAmount();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
+
+        // Verify the signature
+        bytes32 _hash = keccak256(abi.encodePacked(_offlinePrice));
+        bytes32 _ethMessageHash = MessageHashUtils.toEthSignedMessageHash(_hash);
+        bool validSignature = SignatureChecker.isValidSignatureNow(this.owner(), _ethMessageHash, _signature);
+        if(!validSignature) revert InvalidSignature();
 
         // Ask Balancer for a price quote of TOKEN/ETH and for ETH/USDC so we can know the current TOKEN USDC price from balancer.
         uint256 _price = getPrice(_amount, _paymentTokenAddress);
