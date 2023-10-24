@@ -14,7 +14,7 @@ import { IAsset } from "@balancer-labs/v2-interfaces/contracts/vault/IAsset.sol"
 
 import "./Energy.sol";
 
-contract Factory is Ownable, ReentrancyGuard{
+contract Factory is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20Metadata;
 
     address immutable HDAO_TOKEN_ADDRESS = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
@@ -24,6 +24,7 @@ contract Factory is Ownable, ReentrancyGuard{
     bytes32 immutable HDAOWETH_POOLID = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
+    uint256 immutable USDC_PRICE = 26 * 10**17;
 
     address public energyToken;
     uint256 public maxMintAmount;
@@ -65,6 +66,11 @@ contract Factory is Ownable, ReentrancyGuard{
         dynamicExchangeAcceptedDeviationPercentage = 10;
     }
 
+    /**
+     * Sets the amount of energy that can be minted per transaction.
+     * 
+     * @dev Throws if called by any account other than the energy token.
+     */
     function setMaxMintAmount(uint256 _maxMintAmount) 
         public 
         onlyOwner 
@@ -74,6 +80,12 @@ contract Factory is Ownable, ReentrancyGuard{
         maxMintAmount = _maxMintAmount;
     }
 
+    /**
+     * Sets the fixed exchange rates for the tokens.
+     * 
+     * @param _fixedExchangeTokens array of token addresses
+     * @param _fixedExchangeRates array of exchage rates (price per 1 ENRG token)
+     */
     function setFixedExchangeRates(address[] memory _fixedExchangeTokens, uint256[] memory _fixedExchangeRates) 
         public 
         onlyOwner 
@@ -88,6 +100,12 @@ contract Factory is Ownable, ReentrancyGuard{
         }
     }
 
+    /**
+     * Set the tokens that can be used for minting, with a dynamic exchange rate, from a Balancer pool.
+     * 
+     * @param _dynamicExchangeTokens array of token addresses
+     * @param _dynamicExchangePools array of Balancer pool ids (WETH-Token pools)
+     */
     function setDynamicExchangeTokens(address[] memory _dynamicExchangeTokens, bytes32[] memory _dynamicExchangePools) 
         public 
         onlyOwner 
@@ -103,6 +121,12 @@ contract Factory is Ownable, ReentrancyGuard{
         }
     }
 
+    /**
+     * Set the deviation percentage from the provided price and the price from Balancer. 
+     * If the deviation is higher than the provided percentage, the transaction will be reverted.
+     * 
+     * @param _dynamicExchangeAcceptedDeviationPercentage percentage of deviation
+     */
     function setDynamicExchangeAcceptedDeviationPercentage(uint8 _dynamicExchangeAcceptedDeviationPercentage) 
         public 
         onlyOwner 
@@ -112,6 +136,12 @@ contract Factory is Ownable, ReentrancyGuard{
         dynamicExchangeAcceptedDeviationPercentage = _dynamicExchangeAcceptedDeviationPercentage;
     }
 
+    /**
+     * Minting with fixed exchange rate (stablecoin)
+     * 
+     * @param _amount to be minted
+     * @param _paymentTokenAddress to be used for payment
+     */
     function mint(uint256 _amount, address _paymentTokenAddress)
         public 
         nonReentrant
@@ -124,14 +154,23 @@ contract Factory is Ownable, ReentrancyGuard{
         address _to = _msgSender();
         uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
         IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
-        if(_paymentToken.allowance(_to, address(this)) < _price) revert Underpaid();
 
+        if(_paymentToken.allowance(_to, address(this)) < _price) revert Underpaid();
         _paymentToken.safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
+    /**
+     * Minting with dynamic exchange rate (HDAO, BAL, AAVE, etc.).
+     * Sent tokens will be exchanged for WETH and then for USDC and HDAO.
+     * 
+     * @param _amount to be minted
+     * @param _paymentTokenAddress to be used for payment
+     * @param _offlinePrice provided by an offline Oracle
+     * @param _signature that proves the Oracle's price data was provided by the owner
+     */
     function mintWithDynamic(uint256 _amount, address _paymentTokenAddress, uint256 _offlinePrice, bytes memory _signature)
         public 
         nonReentrant
@@ -166,6 +205,12 @@ contract Factory is Ownable, ReentrancyGuard{
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
 
+    /**
+     * Burns the desired ENRG amount, receiving the desired payment token in exchange (if available).
+     * 
+     * @param _amount ENRG to be burned
+     * @param _paymentTokenAddress token to receive as payment
+     */
     function burn(uint256 _amount, address  _paymentTokenAddress) public virtual nonReentrant{
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
@@ -182,6 +227,11 @@ contract Factory is Ownable, ReentrancyGuard{
         emit Burn(_from, _amount, _paymentTokenAddress, _price);
     }
 
+    /**
+     * Lets the contract owner to withdraw any ERC20 token from the contract.
+     * 
+     * @param _erc20 token to withdraw
+     */
     function withdraw(address _erc20) 
         public 
         onlyOwner
@@ -195,7 +245,13 @@ contract Factory is Ownable, ReentrancyGuard{
         emit Withdrawal(_balance, _erc20, block.timestamp);
     }
 
-    // Calculates the price for the amount of energy in the payment token
+    /**
+     * Calculates the price for the amount of ENRG in the payment token.
+     * Can be used from any external actor to calculate the price before minting.
+     * 
+     * @param _amount of energy to be minted
+     * @param _paymentTokenAddress to be used for payment
+     */
     function getPrice(uint256 _amount, address _paymentTokenAddress)
         public 
         returns (uint256)
@@ -209,9 +265,17 @@ contract Factory is Ownable, ReentrancyGuard{
         uint256 _ethPrice = _getSwapPrice(1 * 10**18, USDCWETH_POOLID, WETH_TOKEN_ADDRESS, USDC_TOKEN_ADDRESS) * 10**12; // USDC has only 6 decimals, we need to add some 0s
         uint256 _tokenUSDCPrice = (_tokenPrice*_ethPrice) / 10**18;
 
-        return  (_amount * 26 * 10**17 / _tokenUSDCPrice) * 10**18;
+        return  (_amount * USDC_PRICE / _tokenUSDCPrice) * 10**18;
     }
 
+    /**
+     * Get the swap amount (amount of tokenOut we we'll get with the provided tokenIn) from a Balancer pool.
+     * 
+     * @param _amount of the tokenIn
+     * @param _poolId to look at
+     * @param _tokenIn to be swaped
+     * @param _tokenOut to be received
+     */
     function _getSwapPrice(uint256 _amount, bytes32 _poolId, address _tokenIn, address _tokenOut)
         private
         returns (uint256)
@@ -240,7 +304,12 @@ contract Factory is Ownable, ReentrancyGuard{
         return BalancerQueries.querySwap(_singleSwap, _funds);
     }
 
-
+    /**
+     * Swaps the totalAmount of tokens to HDAO and USDC (depending on the case)
+     * 
+     * @param _totalAmount of tokens to swap
+     * @param _token address
+     */
     function _swapPaymentTokenToHDAOAndUSDC(uint256 _totalAmount, address _token)
         private
     {
@@ -256,6 +325,15 @@ contract Factory is Ownable, ReentrancyGuard{
         _swapPaymentTokens(_amount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
     }
 
+    /**
+     * Swap tokens using Balancer.
+     * It first exchange the token for WETH and then for the desired assetOut.
+     * 
+     * @param _amount of tokens to swap
+     * @param _paymentToken is the initial token to be swapped
+     * @param _assetOut token to be swapped into
+     * @param _poolOut (WETH-AssetOut Balancer pool id)
+     */
     function _swapPaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
         private
         returns (int256[] memory)

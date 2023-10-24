@@ -54,6 +54,7 @@ describe("Energy Token", async () => {
 
             // Errors
             await expect(energyContract.connect(alice).pause()).to.be.revertedWithCustomError(energyContract, "OwnableUnauthorizedAccount");
+            await expect(energyContract.connect(alice).unpause()).to.be.revertedWithCustomError(energyContract, "OwnableUnauthorizedAccount");
         });
 
         it("Should be able to change the Factory", async () => {

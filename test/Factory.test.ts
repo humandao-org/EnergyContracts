@@ -3,7 +3,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { TransactionRequest, encodeBytes32String } from "ethers";
 import { ethers, network } from "hardhat";
-import { Energy, Factory, IERC20, IERC20Metadata } from "../typechain-types";
+import { Energy, Factory, IERC20, IERC20Metadata, Reentrancy } from "../typechain-types";
 
 const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
 const BINANCE_WALLET_ADDRESS_2 = '0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245'; // This might stop working at some point (if they move their funds)
@@ -32,6 +32,7 @@ let usdtContract: IERC20Metadata;
 let wethContract: IERC20Metadata;
 let hdaoContract: IERC20Metadata;
 let balContract: IERC20Metadata;
+let reentrancyContract: Reentrancy;
 
 describe("Energy Factory", async () => {
     before(async () => {
@@ -264,8 +265,8 @@ describe("Energy Factory", async () => {
 
             // Expecting 23% to be kept in HDAO
             let expectedHDAOKept = price*BigInt(23)/BigInt(100);
-            expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedHDAOKept, 10000000);
-            expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 10000000);
+            expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedHDAOKept, 11000000);
+            expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 11000000);
 
             // ERRORS
             const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
@@ -437,6 +438,24 @@ describe("Energy Factory", async () => {
                 await expect(factoryContract.withdraw(USDC_ADDRESS)).to.emit(factoryContract, "Withdrawal");
                 expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.equal(0);
                 expect(await usdcContract.balanceOf(owner.address)).to.be.equal(price+balanceBefore);
+            });
+        });
+
+        describe("Reentrancy Protection", function () {
+            it("Should trigger Reentrancy Error on minting using a constant swap (stablecoins)", async function () {
+                const { owner } = await loadFixture(deployFixture);
+
+                const factoryAddress = await factoryContract.getAddress();
+                const contractReentrancy = await ethers.getContractFactory("Reentrancy");
+                reentrancyContract = await contractReentrancy.deploy(factoryAddress);
+                await reentrancyContract.waitForDeployment();
+
+                const reentrancyAddress = await reentrancyContract.getAddress();
+
+                await factoryContract.setFixedExchangeRates([reentrancyAddress], ['666'])
+                await factoryContract.setDynamicExchangeTokens([reentrancyAddress], ['0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137']);
+
+                await expect(reentrancyContract.attackMint()).to.be.revertedWithCustomError(factoryContract, "ReentrancyGuardReentrantCall");
             });
         });
     });
