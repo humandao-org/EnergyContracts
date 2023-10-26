@@ -1,6 +1,7 @@
 import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 import { HardhatUserConfig } from "hardhat/config";
+import "hardhat-deploy";
 
 dotenv.config();
 
@@ -27,6 +28,11 @@ const config: HardhatUserConfig = {
         accountsBalance: "10000000000000000000000",
       },
     },
+    mumbai: {
+      url: 'https://polygon-mumbai.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
+      chainId: 80001,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : "remote",
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
@@ -34,7 +40,12 @@ const config: HardhatUserConfig = {
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY
-  }
+  },
+  namedAccounts: {
+    deployer: {
+      default: 0,
+    },
+  },
 };
 
 export default config;

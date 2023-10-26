@@ -202,6 +202,16 @@ describe("Energy Factory", async () => {
             await expect(factoryContract.connect(alice).setDynamicExchangeAcceptedDeviationPercentage(percentage)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
             await expect(factoryContract.setDynamicExchangeAcceptedDeviationPercentage(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
         });
+
+        it("Should be able to change the trusted Signer", async () => {
+            const { owner, alice, bob } = await loadFixture(deployFixture);
+            await factoryContract.setTrustedSigner(alice.address);
+            expect(await factoryContract.trustedSigner()).to.be.equal(alice.address);
+
+            // ERRORS
+            await expect(factoryContract.connect(bob).setTrustedSigner(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+            await expect(factoryContract.setTrustedSigner(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+        })
     });
 
     describe("Minting", () => {

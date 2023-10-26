@@ -37,3 +37,13 @@ yarn
 ```bash
 npx hardhat test
 ```
+
+## Deploying
+
+All the scripts are located in the /deploy folder will be executed using the hardhat-deploy plugin.
+- 001_deploy_energy.ts will deploy the ERC20 Energy Token, setting the owner and the factory address as the deployer address.
+- 002_deploy_factory.ts will deploy the Factory contract. Please set up the constants in the begining of the file to the correct values.
+
+```bash
+PRIVATE_KEY=abcdefgh npx hardhat deploy --network mumbai
+```

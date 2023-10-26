@@ -26,6 +26,7 @@ contract Factory is Ownable, ReentrancyGuard {
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
     uint256 immutable USDC_PRICE = 26 * 10**17;
 
+    address public trustedSigner;
     address public energyToken;
     uint256 public maxMintAmount;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
@@ -64,6 +65,7 @@ contract Factory is Ownable, ReentrancyGuard {
         setFixedExchangeRates(_fixedExchangeTokens, _fixedExchangeRates);
         setDynamicExchangeTokens(_dynamicExchangeTokens, _dynamicExchangePools);
         dynamicExchangeAcceptedDeviationPercentage = 10;
+        trustedSigner = _initialOwner;
     }
 
     /**
@@ -137,6 +139,20 @@ contract Factory is Ownable, ReentrancyGuard {
     }
 
     /**
+     * Set the trusted signer address. Will be used for offline price signature verification
+     * 
+     * @param _trustedSigner address of the trusted signer
+     */
+    function setTrustedSigner(address _trustedSigner) 
+        public 
+        onlyOwner 
+    {
+        if(_trustedSigner == address(0)) revert InvalidParamsZeroAddress();
+
+        trustedSigner = _trustedSigner;
+    }
+
+    /**
      * Minting with fixed exchange rate (stablecoin)
      * 
      * @param _amount to be minted
@@ -185,7 +201,7 @@ contract Factory is Ownable, ReentrancyGuard {
         // Verify the signature
         bytes32 _hash = keccak256(abi.encodePacked(_offlinePrice));
         bytes32 _ethMessageHash = MessageHashUtils.toEthSignedMessageHash(_hash);
-        bool validSignature = SignatureChecker.isValidSignatureNow(this.owner(), _ethMessageHash, _signature);
+        bool validSignature = SignatureChecker.isValidSignatureNow(trustedSigner, _ethMessageHash, _signature);
         if(!validSignature) revert InvalidSignature();
 
         // Ask Balancer for a price quote of TOKEN/ETH and for ETH/USDC so we can know the current TOKEN USDC price from balancer.
