@@ -24,7 +24,7 @@ contract Factory is Ownable, ReentrancyGuard {
     bytes32 immutable HDAOWETH_POOLID = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
-    uint256 immutable USDC_PRICE = 26 * 10**17;
+    uint256 immutable USDC_PRICE = 25 * 10**17;
 
     address public trustedSigner;
     address public energyToken;
@@ -33,6 +33,7 @@ contract Factory is Ownable, ReentrancyGuard {
     mapping (address => bytes32) public dynamicExchangeTokens; // token address => WETH-Token Balancer pool id
     address[] public fixedExchangeTokens;
     uint8 public dynamicExchangeAcceptedDeviationPercentage;
+    uint256 public burningPrice; // Fixed burning price (without decimals!) to be paid in the burning
 
     error InvalidParams();
     error InvalidParamsLength();
@@ -66,6 +67,7 @@ contract Factory is Ownable, ReentrancyGuard {
         setDynamicExchangeTokens(_dynamicExchangeTokens, _dynamicExchangePools);
         dynamicExchangeAcceptedDeviationPercentage = 10;
         trustedSigner = _initialOwner;
+        burningPrice = 2;
     }
 
     /**
@@ -152,6 +154,15 @@ contract Factory is Ownable, ReentrancyGuard {
         trustedSigner = _trustedSigner;
     }
 
+    function setBurningPrice(uint256 _burningPrice) 
+        public 
+        onlyOwner 
+    {
+        if(_burningPrice == 0) revert InvalidParamsZeroValue();
+
+        burningPrice = _burningPrice;
+    }
+
     /**
      * Minting with fixed exchange rate (stablecoin)
      * 
@@ -230,11 +241,10 @@ contract Factory is Ownable, ReentrancyGuard {
     function burn(uint256 _amount, address  _paymentTokenAddress) public virtual nonReentrant{
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
 
         address _from = _msgSender();
-        uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
         IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
+        uint256 _price = burningPrice*_amount*10**_paymentToken.decimals();
         if(_paymentToken.balanceOf(address(this)) < _price) revert NotEnoughFunds();
 
         Energy(energyToken).burn(_from, _amount);
@@ -331,8 +341,8 @@ contract Factory is Ownable, ReentrancyGuard {
     {
         if(_totalAmount == 0) revert InvalidParamsZeroValue();
         
-        // Swap some (77%, $2 for every $2.6) $HDAO to USDC
-        uint256 _amount = _totalAmount*77/100;
+        // Swap some (80%, $2 for every $2.5) $HDAO to USDC
+        uint256 _amount = _totalAmount*80/100;
 
         if(_token != HDAO_TOKEN_ADDRESS){
             _swapPaymentTokens(_totalAmount-_amount, _token, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);

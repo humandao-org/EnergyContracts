@@ -67,7 +67,7 @@ describe("Energy Token", async () => {
             await expect(energyContract.connect(alice).setFactory(alice.address)).to.be.revertedWithCustomError(energyContract, "OwnableUnauthorizedAccount");
         });
 
-        it("Should NOT be able to call Facrory functions", async () => {
+        it("Should NOT be able to call Factory functions", async () => {
             const { alice } = await loadFixture(deployFixture);
             await expect(energyContract.connect(alice).mint(alice.address, 1000)).to.be.revertedWithCustomError(energyContract, "UnauthorizedFactory");
             await expect(energyContract.connect(alice)["burn(address,uint256)"](alice.address, 1000)).to.be.revertedWithCustomError(energyContract, "UnauthorizedFactory");

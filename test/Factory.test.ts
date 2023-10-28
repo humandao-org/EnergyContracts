@@ -16,8 +16,8 @@ const BAL_ADDRESS = '0x9a71012b13ca4d3d0cdc72a177df3ef03b0e76a3';
 const HDAO_ADDRESS = '0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88';
 
 const fixedExchangeRates = [
-    { address: USDC_ADDRESS, amount: 4 },
-    { address: USDT_ADDRESS, amount: 2 },
+    { address: USDC_ADDRESS, amount: BigInt(4) *  BigInt(10)**BigInt(6) }, // Beware with the 6 decimals for these tokens!!!
+    { address: USDT_ADDRESS, amount: BigInt(2) * BigInt(10)**BigInt(6) },
 ];
 
 const dynamicExchangeTokens = [
@@ -101,10 +101,10 @@ describe("Energy Factory", async () => {
         await owner.sendTransaction({ to: HDAO_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
         await owner.sendTransaction({ to: BAL_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
 
-        const usdcAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 100000 USDC
-        const usdtAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 100000 USDT
+        const usdcAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 1000000 USDC
+        const usdtAmount: bigint = BigInt(100000) * BigInt(10)**await usdtContract.decimals(); // 1000000 USDT
         const wethAmount: bigint = BigInt(100) * BigInt(10)**await wethContract.decimals(); // 100 WETH
-        const hdaoAmount: bigint = BigInt(1000000) * BigInt(10)**await hdaoContract.decimals(); // 1000000 HDAO
+        const hdaoAmount: bigint = BigInt(100000) * BigInt(10)**await hdaoContract.decimals(); // 1000000 HDAO
         const balAmount: bigint = BigInt(10000) * BigInt(10)**await balContract.decimals(); // 10000 BAL
         await usdcContract.connect(binanceSigner2).transfer(owner.address, usdcAmount)
         await usdtContract.connect(binanceSigner2).transfer(owner.address, usdtAmount)
@@ -140,6 +140,18 @@ describe("Energy Factory", async () => {
             await expect(factoryContract.transferOwnership(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
             await expect(factoryContract.connect(alice).transferOwnership(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "OwnableInvalidOwner");
         })
+
+        it("Should be able to set th Burning price", async () => {
+            const { owner, alice } = await loadFixture(deployFixture);
+            expect(await factoryContract.burningPrice()).to.be.equal(BigInt(2));
+
+            await factoryContract.setBurningPrice(BigInt(1));
+            expect(await factoryContract.burningPrice()).to.be.equal(BigInt(1));
+
+            // ERRORS
+            await expect(factoryContract.connect(alice).setBurningPrice(BigInt(1))).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+            await expect(factoryContract.setBurningPrice(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+        });
 
         it("Should be able to set max mint amount", async () => {
             const { alice } = await loadFixture(deployFixture);
@@ -273,8 +285,8 @@ describe("Energy Factory", async () => {
 
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
 
-            // Expecting 23% to be kept in HDAO
-            let expectedHDAOKept = price*BigInt(23)/BigInt(100);
+            // Expecting 20% to be kept in HDAO
+            let expectedHDAOKept = price*BigInt(20)/BigInt(100);
             expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedHDAOKept, 11000000);
             expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 11000000);
 
@@ -351,17 +363,19 @@ describe("Energy Factory", async () => {
 
             const amount = BigInt(100);
             const price = await approvePaymentToken(amount, usdcContract);
+
             await factoryContract.mint(amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
             expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price);
 
+            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount;
             const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
             await expect(factoryContract.burn(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Burn")
-                .withArgs(owner.address, amount, USDC_ADDRESS, price);
+                .withArgs(owner.address, amount, USDC_ADDRESS, burningPrice);
 
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(0);
-            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(ownerUsdcBefore+price);
+            expect(await usdcContract.balanceOf(owner.address)).to.be.equal(ownerUsdcBefore+burningPrice);
         });
 
         it("Should be able to burn and get a different payment token", async () => {
@@ -380,12 +394,13 @@ describe("Energy Factory", async () => {
             const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
             const aliceUsdtBefore = await usdtContract.balanceOf(alice.address);
             const aliceUsdcBefore = await usdcContract.balanceOf(alice.address);
+            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdtContract.decimals() * amountAlice;
             await expect(factoryContract.connect(alice).burn(amountAlice, USDT_ADDRESS))
                 .to.emit(factoryContract, "Burn")
-                .withArgs(alice.address, amountAlice, USDT_ADDRESS, priceUSDT/BigInt(4));
+                .withArgs(alice.address, amountAlice, USDT_ADDRESS, burningPrice);
 
             expect(await energyContract.balanceOf(alice.address)).to.be.equal(0);
-            expect(await usdtContract.balanceOf(alice.address)).to.be.equal(aliceUsdtBefore+priceUSDT/BigInt(4));
+            expect(await usdtContract.balanceOf(alice.address)).to.be.equal(aliceUsdtBefore+burningPrice);
             expect(await usdcContract.balanceOf(alice.address)).to.be.equal(aliceUsdcBefore);
 
             // Owner still have the same balances (after his mint and alice burn)
@@ -412,9 +427,11 @@ describe("Energy Factory", async () => {
             await expect(factoryContract.burn(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "EnforcedPause");
 
             await energyContract.unpause();
+
+            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount;
             await expect(factoryContract.burn(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Burn")
-                .withArgs(owner.address, amount, USDC_ADDRESS, price);
+                .withArgs(owner.address, amount, USDC_ADDRESS, burningPrice);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(0);
         });
     });
