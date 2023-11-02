@@ -293,6 +293,10 @@ describe("Energy Factory", async () => {
             // ERRORS
             const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
             await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+            const price2 = price*BigInt(2);
+            const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
+            const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
+            await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
             await expect(factoryContract.mintWithDynamic(0, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
             await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
             await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
@@ -333,6 +337,10 @@ describe("Energy Factory", async () => {
             // ERRORS
             const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
             await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+            const price2 = price*BigInt(2);
+            const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
+            const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
+            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
             await expect(factoryContract.mintWithDynamic(0, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
             await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
             await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
