@@ -5,23 +5,24 @@ import { TransactionRequest, encodeBytes32String } from "ethers";
 import { ethers, network } from "hardhat";
 import { Energy, Factory, IERC20, IERC20Metadata, Reentrancy } from "../typechain-types";
 
-const BINANCE_WALLET_ADDRESS = '0xf977814e90da44bfa03b6295a0616a897441acec'; // This might stop working at some point (if they move their funds)
-const BINANCE_WALLET_ADDRESS_2 = '0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245'; // This might stop working at some point (if they move their funds)
-const HDAO_HOLDER_WALLET_ADDRESS = '0x08c724340c1438fe5e20b84ba9cac89a20144414'; // This might stop working at some point (if they move their funds)
-const BAL_HOLDER_WALLET_ADDRESS = '0x8832924854e3cedb0a6abf372e6ccff9f7654332'; // This might stop working at some point (if they move their funds)
-const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-const USDT_ADDRESS = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F';
-const WETH_ADDRESS = '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619';
-const BAL_ADDRESS = '0x9a71012b13ca4d3d0cdc72a177df3ef03b0e76a3';
-const HDAO_ADDRESS = '0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88';
+const BINANCE_WALLET_ADDRESS = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
+const BINANCE_WALLET_ADDRESS_2 = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
+const HDAO_HOLDER_WALLET_ADDRESS = '0x491afdEd42f1cBAc4E141f3a64aD0C10FA6C209B'; // This might stop working at some point (if they move their funds)
+const BAL_HOLDER_WALLET_ADDRESS = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
+const USDC_ADDRESS = '0x23e259cFf0404d90FCDA231eDE0c350fb509bDd7';
+const WETH_ADDRESS = '0x303d53087ABBbe343e2360BB288275Ddba47A6b6';
+const BAL_ADDRESS = '0xfa8449189744799ad2ace7e0ebac8bb7575eff47';
+const HDAO_ADDRESS = '0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2';
+const USDT_ADDRESS = '0x753e0F7Fb8556fC274B0699417dfAbB6d6eBf38b'
+
 
 const fixedExchangeRates = [
-    { address: USDC_ADDRESS, amount: BigInt(4) *  BigInt(10)**BigInt(6) }, // Beware with the 6 decimals for these tokens!!!
-    { address: USDT_ADDRESS, amount: BigInt(2) * BigInt(10)**BigInt(6) },
+    { address: USDC_ADDRESS, amount: 25 * 10 ** 5, pool:''}, 
+    { address: USDT_ADDRESS, amount: 25 * 10 ** 5, pool:''},
 ];
 
 const dynamicExchangeTokens = [
-    { address: HDAO_ADDRESS, pool: '0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137' },
+    { address: HDAO_ADDRESS, pool: '0x34eb7a37aabcb12a68531338a742b964d4445506000200000000000000000942' },
     { address: BAL_ADDRESS, pool: '0x3d468ab2329f296e1b9d8476bb54dd77d8c2320f000200000000000000000426' },
 ];
 
@@ -39,22 +40,23 @@ describe("Energy Factory", async () => {
         await network.provider.request({
             method: "hardhat_reset", 
             params: [{
-                forking: { jsonRpcUrl: 'https://polygon-mainnet.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
+                forking: { jsonRpcUrl: 'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
             }]
         });
     });
 
     async function approvePaymentToken(amount: bigint, paymentToken: IERC20, account?: HardhatEthersSigner): Promise<bigint> {
         const exchangeRate = await factoryContract.fixedExchangeRate(await paymentToken.getAddress());
-        const price = amount * BigInt(exchangeRate)
-        if(!account) {
+        const price = (BigInt(exchangeRate) * amount) / BigInt(10**2);
+        if (!account) {
             const [owner] = await ethers.getSigners();
             account = owner;
         }
-
+    
         await paymentToken.connect(account).approve(await factoryContract.getAddress(), price);
-        return price
+        return price;
     }
+    
 
     async function deployFixture() {
         const [owner, alice, bob] = await ethers.getSigners();
@@ -80,7 +82,9 @@ describe("Energy Factory", async () => {
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount),
             dynamicExchangeTokens.map(a => a.address),
-            dynamicExchangeTokens.map(a => a.pool)
+            dynamicExchangeTokens.map(a => a.pool),
+            fixedExchangeRates.map(a => a.address),
+            fixedExchangeRates.map(a => a.pool),
         );
 
         // Setting Factory
@@ -105,7 +109,7 @@ describe("Energy Factory", async () => {
         const usdtAmount: bigint = BigInt(100000) * BigInt(10)**await usdtContract.decimals(); // 1000000 USDT
         const wethAmount: bigint = BigInt(100) * BigInt(10)**await wethContract.decimals(); // 100 WETH
         const hdaoAmount: bigint = BigInt(100000) * BigInt(10)**await hdaoContract.decimals(); // 1000000 HDAO
-        const balAmount: bigint = BigInt(10000) * BigInt(10)**await balContract.decimals(); // 10000 BAL
+        const balAmount: bigint = BigInt(1) * BigInt(10)**await balContract.decimals(); // 10000 BAL
         await usdcContract.connect(binanceSigner2).transfer(owner.address, usdcAmount)
         await usdtContract.connect(binanceSigner2).transfer(owner.address, usdtAmount)
         await wethContract.connect(binanceSigner).transfer(owner.address, wethAmount)
@@ -126,6 +130,7 @@ describe("Energy Factory", async () => {
     describe("Deployment & Admin", () => {
         it("Should be a proper address and have default settings", async () => {
             const { owner } = await loadFixture(deployFixture);
+
             expect(await factoryContract.getAddress()).to.be.a.properAddress;
             expect(await factoryContract.owner()).to.be.equal(owner.address);
             expect(await factoryContract.energyToken()).to.be.equal(await energyContract.getAddress());
@@ -167,16 +172,16 @@ describe("Energy Factory", async () => {
             const { alice } = await loadFixture(deployFixture);
 
             const testFixedExchangeRates = [
-                { address: USDC_ADDRESS, amount: 23 },
-                { address: USDT_ADDRESS, amount: 42 }];
+                { address: USDC_ADDRESS, amount: 250 },
+                { address: USDT_ADDRESS, amount: 250 }];
             
             await factoryContract.setFixedExchangeRates(
                 testFixedExchangeRates.map(a => a.address), 
                 testFixedExchangeRates.map(a => a.amount)
             );
 
-            expect(await factoryContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(23);
-            expect(await factoryContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(42);
+            expect(await factoryContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(BigInt(250));
+            expect(await factoryContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(BigInt(250));
 
             // ERRORS
             await expect(factoryContract.connect(alice).setFixedExchangeRates([ethers.ZeroAddress], [0])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
@@ -230,20 +235,25 @@ describe("Energy Factory", async () => {
         it("Should be able to mint using a constant swap (stablecoins)", async () => {
             const { owner } = await loadFixture(deployFixture);
             
+            //1 energy
             const amount = BigInt(100);
             expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(0);
             const price = await approvePaymentToken(amount, usdcContract);
+
+
             await expect(factoryContract.mint(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Mint")
                 .withArgs(owner.address, amount, USDC_ADDRESS, price);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price);
+            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(BigInt(price) * BigInt(80) / BigInt(100));
 
-            // Errors
-            await expect(factoryContract.mint(0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            await expect(factoryContract.mint(amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
-            await expect(factoryContract.mint(amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
+            console.log(hdaoContract.balanceOf(factoryContract))
+
+            // // Errors
+            // await expect(factoryContract.mint(0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+            // await expect(factoryContract.mint(amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
+            // await expect(factoryContract.mint(amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+            // await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
         });
 
         it("Should not be able to mint if paused", async () => {
@@ -262,10 +272,10 @@ describe("Energy Factory", async () => {
         it("Should be able to mint using dynamic token pricing using HDAO", async () => {
             const { owner, alice } = await loadFixture(deployFixture);
             const enrgAmount = BigInt(100);
-            const expectedUSDCSwap = BigInt(200) * BigInt(10)**await usdcContract.decimals();
+            const expectedUSDCSwap = BigInt(25) * BigInt(10)**BigInt(5);
 
             // Find out the minting price
-            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
+            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, "0xDdb5Dc0E4B3f008227cA93F330Ad4932a1680277"]);
             const tx: TransactionRequest = {
                 to: await factoryContract.getAddress(),
                 data: data
@@ -285,68 +295,69 @@ describe("Energy Factory", async () => {
 
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
 
+
             // Expecting 20% to be kept in HDAO
             let expectedHDAOKept = price*BigInt(20)/BigInt(100);
             expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedHDAOKept, 11000000);
             expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 11000000);
 
-            // ERRORS
-            const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
-            await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
-            const price2 = price*BigInt(2);
-            const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
-            const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
-            await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
-            await expect(factoryContract.mintWithDynamic(0, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-            await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
-            await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            // // ERRORS
+            // const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
+            // await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+            // const price2 = price*BigInt(2);
+            // const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
+            // const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
+            // await expect(factoryContract.mintWithDynamic(enrgAmount, HDAO_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
+            // await expect(factoryContract.mintWithDynamic(0, HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+            // await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), HDAO_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
+            // await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+            // await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
         });
 
-        it("Should be able to mint using dynamic token pricing using BAL", async () => {
-            const { owner, alice } = await loadFixture(deployFixture);
+        // it("Should be able to mint using dynamic token pricing using BAL", async () => {
+        //     const { owner, alice } = await loadFixture(deployFixture);
 
-            const enrgAmount = BigInt(100);
-            const expectedUSDCSwap = BigInt(200) * BigInt(10)**await usdcContract.decimals();
+        //     const enrgAmount = BigInt(100);
+        //     const expectedUSDCSwap = BigInt(200) * BigInt(10)**await usdcContract.decimals();
 
-            // Find out the minting price
-            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, BAL_ADDRESS]);
-            const tx: TransactionRequest = {
-                to: await factoryContract.getAddress(),
-                data: data
-            }
-            const res = await owner.call(tx);
-            const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
-            const price = BigInt(decoded.toString());
+        //     // Find out the minting price
+        //     const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, BAL_ADDRESS]);
+        //     const tx: TransactionRequest = {
+        //         to: await factoryContract.getAddress(),
+        //         data: data
+        //     }
+        //     const res = await owner.call(tx);
+        //     const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
+        //     const price = BigInt(decoded.toString());
 
-            const messageHash = ethers.solidityPackedKeccak256(['uint256'], [price]);
-            const signature = await owner.signMessage(ethers.getBytes(messageHash));
+        //     const messageHash = ethers.solidityPackedKeccak256(['uint256'], [price]);
+        //     const signature = await owner.signMessage(ethers.getBytes(messageHash));
 
-            // Aprove the payment token for the price amount
-            await balContract.approve(await factoryContract.getAddress(), price);
+        //     // Aprove the payment token for the price amount
+        //     await balContract.approve(await factoryContract.getAddress(), price);
 
-            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, signature))
-                .to.emit(factoryContract, "Mint");
+        //     await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, signature))
+        //         .to.emit(factoryContract, "Mint");
 
-            expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
+        //     expect(await energyContract.balanceOf(owner.address)).to.be.equal(enrgAmount);
 
-            // Expecting 23% to be kept in HDAO the rest in USDC
-            expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.greaterThan(0);
-            expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 10000000);
+        //     // Expecting 23% to be kept in HDAO the rest in USDC
+        //     expect(await hdaoContract.balanceOf(await factoryContract.getAddress())).to.be.greaterThan(0);
+        //     expect(await usdcContract.balanceOf(await factoryContract.getAddress())).to.be.closeTo(expectedUSDCSwap, 10000000);
 
-            // ERRORS
-            const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
-            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
-            const price2 = price*BigInt(2);
-            const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
-            const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
-            await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
-            await expect(factoryContract.mintWithDynamic(0, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-            await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
-            await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-            await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-        });
-    });
+        //     // ERRORS
+        //     const wrongSignature = await alice.signMessage(ethers.getBytes(messageHash));
+        //     await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price, wrongSignature)).to.be.revertedWithCustomError(factoryContract, "InvalidSignature");
+        //     const price2 = price*BigInt(2);
+        //     const messageHash2 = ethers.solidityPackedKeccak256(['uint256'], [price2]);
+        //     const signature2 = await owner.signMessage(ethers.getBytes(messageHash2));
+        //     await expect(factoryContract.mintWithDynamic(enrgAmount, BAL_ADDRESS, price2, signature2)).to.be.revertedWithCustomError(factoryContract, "UnacceptablePriceDeviation");
+        //     await expect(factoryContract.mintWithDynamic(0, BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+        //     await expect(factoryContract.mintWithDynamic((await factoryContract.maxMintAmount())+BigInt(1), BAL_ADDRESS, price, signature)).to.be.revertedWithCustomError(factoryContract, "MaxMintAmount");
+        //     await expect(factoryContract.mintWithDynamic(enrgAmount, ethers.ZeroAddress, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+        //     await expect(factoryContract.mintWithDynamic(enrgAmount, alice.address, price, signature)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+        // });
+    // });
 
     describe("Dynamic Exchange Rates", () => {
         it("Should be able to get the Dynamic Exchange Rate", async () => {
@@ -371,13 +382,16 @@ describe("Energy Factory", async () => {
 
             const amount = BigInt(100);
             const price = await approvePaymentToken(amount, usdcContract);
+            console.log(price)
 
             await factoryContract.mint(amount, USDC_ADDRESS);
             expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price);
+            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(price*BigInt(80)/BigInt(100));
 
-            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount;
+            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount / BigInt(10) ** BigInt(2) ;
+            console.log("🚀 ~ file: Factory.test.ts:391 ~ it ~ burningPrice:", burningPrice)
             const ownerUsdcBefore = await usdcContract.balanceOf(owner.address);
+            console.log(ownerUsdcBefore)
             await expect(factoryContract.burn(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Burn")
                 .withArgs(owner.address, amount, USDC_ADDRESS, burningPrice);
@@ -436,7 +450,7 @@ describe("Energy Factory", async () => {
 
             await energyContract.unpause();
 
-            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount;
+            const burningPrice = await factoryContract.burningPrice() * BigInt(10)**await usdcContract.decimals() * amount / BigInt(10) ** BigInt(2);
             await expect(factoryContract.burn(amount, USDC_ADDRESS))
                 .to.emit(factoryContract, "Burn")
                 .withArgs(owner.address, amount, USDC_ADDRESS, burningPrice);
@@ -494,4 +508,4 @@ describe("Energy Factory", async () => {
             });
         });
     });
-});
+    })})

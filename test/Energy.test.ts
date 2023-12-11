@@ -10,7 +10,7 @@ describe("Energy Token", async () => {
         await network.provider.request({
             method: "hardhat_reset", 
             params: [{
-                forking: { jsonRpcUrl: 'https://polygon-mainnet.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
+                forking: { jsonRpcUrl:'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
             }]
         });
     });
@@ -34,7 +34,7 @@ describe("Energy Token", async () => {
             expect(await energyContract.getAddress()).to.be.a.properAddress;
             expect(await energyContract.owner()).to.be.equal(owner.address);
             expect(await energyContract.factory()).to.be.equal(owner.address);
-            expect(await energyContract.decimals()).to.be.equal(1);
+            expect(await energyContract.decimals()).to.be.equal(2);
         });
 
         it("Should be able to change its Owner", async () => {

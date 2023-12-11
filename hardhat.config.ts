@@ -33,6 +33,14 @@ const config: HardhatUserConfig = {
       chainId: 80001,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : "remote",
     },
+    goerli: {
+      url: 'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
+      accounts: [`0x${process.env.PRIVATE_KEY}`]
+    },
+    sepolia: {
+      url: 'https://eth-sepolia.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
+      accounts: [`0x${process.env.PRIVATE_KEY}`]
+    }
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,

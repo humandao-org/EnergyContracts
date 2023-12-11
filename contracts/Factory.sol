@@ -17,20 +17,21 @@ import "./Energy.sol";
 contract Factory is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20Metadata;
 
-    address immutable HDAO_TOKEN_ADDRESS = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
-    address immutable USDC_TOKEN_ADDRESS = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
-    address immutable WETH_TOKEN_ADDRESS = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
-    bytes32 immutable USDCWETH_POOLID = 0x10f21c9bd8128a29aa785ab2de0d044dcdd79436000200000000000000000059;
-    bytes32 immutable HDAOWETH_POOLID = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
+    address immutable HDAO_TOKEN_ADDRESS = 0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2;
+    address immutable USDC_TOKEN_ADDRESS = 0x23e259cFf0404d90FCDA231eDE0c350fb509bDd7;
+    address immutable WETH_TOKEN_ADDRESS = 0x303d53087ABBbe343e2360BB288275Ddba47A6b6;
+    bytes32 immutable USDCWETH_POOLID = 0xefed1e8b816e245847230368c302dd97791a5964000200000000000000000940;
+    bytes32 immutable HDAOWETH_POOLID = 0x34eb7a37aabcb12a68531338a742b964d4445506000200000000000000000942;
     IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
-    uint256 immutable USDC_PRICE = 25 * 10**17;
+    uint256 immutable USDC_PRICE = 25 * 10**5;
 
     address public trustedSigner;
     address public energyToken;
     uint256 public maxMintAmount;
     mapping (address => uint) public fixedExchangeRate; // token address => exchange rate (? token = 1 ENRG)
     mapping (address => bytes32) public dynamicExchangeTokens; // token address => WETH-Token Balancer pool id
+    mapping (address => bytes32) public stableExchangeTokens; // token address => WETH-Token Balancer pool id
     address[] public fixedExchangeTokens;
     uint8 public dynamicExchangeAcceptedDeviationPercentage;
     uint256 public burningPrice; // Fixed burning price (without decimals!) to be paid in the burning
@@ -45,10 +46,12 @@ contract Factory is Ownable, ReentrancyGuard {
     error OnlyEnergy();
     error UnacceptablePriceDeviation();
     error InvalidSignature();
+    error InvalidAmount(string message);
 
     event Mint(address indexed _to, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Withdrawal(uint amount, address erc20, uint when);
+    event Price(uint amount, address paymentAddress, uint price);
 
     constructor(
         address _initialOwner, 
@@ -57,7 +60,9 @@ contract Factory is Ownable, ReentrancyGuard {
         address[] memory _fixedExchangeTokens, 
         uint256[] memory _fixedExchangeRates,
         address[] memory _dynamicExchangeTokens,
-        bytes32[] memory _dynamicExchangePools
+        bytes32[] memory _dynamicExchangePools,
+        address[] memory _stableExchangeTokens,
+        bytes32[] memory _stableExchangePools
     )
         Ownable(_initialOwner)
     {
@@ -68,6 +73,7 @@ contract Factory is Ownable, ReentrancyGuard {
         dynamicExchangeAcceptedDeviationPercentage = 10;
         trustedSigner = _initialOwner;
         burningPrice = 2;
+        setStableExchangeTokens(_stableExchangeTokens, _stableExchangePools);
     }
 
     /**
@@ -105,6 +111,29 @@ contract Factory is Ownable, ReentrancyGuard {
     }
 
     /**
+     * Set the stablecoins that can be used for minting
+     * 
+     * @param _fixedExchangeTokens array of token addresses
+     * @param _fixedExchangeRates array of Balancer pool ids (WETH-Token pools)
+     */
+    function setFixedExchangeTokens(address[] memory _fixedExchangeTokens, uint256[] memory _fixedExchangeRates) 
+        public 
+        onlyOwner 
+    {
+        if(_fixedExchangeTokens.length == 0) revert InvalidParamsLength();
+        if(_fixedExchangeRates.length == 0) revert InvalidParamsLength();
+        if(_fixedExchangeRates.length != _fixedExchangeTokens.length) revert InvalidParamsLength();
+
+        fixedExchangeTokens = _fixedExchangeTokens;
+
+        for(uint8 i = 0; i < _fixedExchangeTokens.length; i++) {
+            if(_fixedExchangeTokens[i] == address(0)) revert InvalidParamsZeroAddress();
+            if(_fixedExchangeRates[i] == 0) revert InvalidParamsZeroValue();
+            fixedExchangeRate[_fixedExchangeTokens[i]] = _fixedExchangeRates[i];
+        }
+    }
+
+    /**
      * Set the tokens that can be used for minting, with a dynamic exchange rate, from a Balancer pool.
      * 
      * @param _dynamicExchangeTokens array of token addresses
@@ -122,6 +151,27 @@ contract Factory is Ownable, ReentrancyGuard {
             if(_dynamicExchangeTokens[i] == address(0)) revert InvalidParamsZeroAddress();
             if(_dynamicExchangePools[i] == 0) revert InvalidParamsZeroValue();
             dynamicExchangeTokens[_dynamicExchangeTokens[i]] = _dynamicExchangePools[i];
+        }
+    }
+
+        /**
+     * Set the tokens that can be used for minting, with a dynamic exchange rate, from a Balancer pool.
+     * 
+     * @param _stableExchangeTokens array of token addresses
+     * @param _stableExchangePools array of Balancer pool ids (WETH-Token pools)
+     */
+    function setStableExchangeTokens(address[] memory _stableExchangeTokens, bytes32[] memory _stableExchangePools) 
+        public 
+        onlyOwner 
+    {
+        if(_stableExchangeTokens.length == 0) revert InvalidParamsLength();
+        if(_stableExchangePools.length == 0) revert InvalidParamsLength();
+        if(_stableExchangeTokens.length != _stableExchangePools.length) revert InvalidParamsLength();
+
+        for(uint8 i = 0; i < _stableExchangeTokens.length; i++) {
+            if(_stableExchangeTokens[i] == address(0)) revert InvalidParamsZeroAddress();
+            if(_stableExchangePools[i] == 0) revert InvalidParamsZeroValue();
+            stableExchangeTokens[_stableExchangeTokens[i]] = _stableExchangePools[i];
         }
     }
 
@@ -169,25 +219,42 @@ contract Factory is Ownable, ReentrancyGuard {
      * @param _amount to be minted
      * @param _paymentTokenAddress to be used for payment
      */
-    function mint(uint256 _amount, address _paymentTokenAddress)
-        public 
-        nonReentrant
-    {
-        if(_amount == 0) revert InvalidParamsZeroValue();
-        if(_amount > maxMintAmount) revert MaxMintAmount();
-        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
+function mint(uint256 _amount, address _paymentTokenAddress)
+    public 
+    nonReentrant
+{
+    if(_amount < 5) revert InvalidAmount("Amount must be at least 0.05 ENRG");
+    if(_amount > maxMintAmount) revert MaxMintAmount(); // 3000 ENRG in integer terms
+    if(_amount % 5 != 0) revert InvalidAmount("Amount must be divisible by 5");
 
-        address _to = _msgSender();
-        uint256 _price = fixedExchangeRate[_paymentTokenAddress]*_amount;
-        IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
+    if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
+    if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
+    
+    IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
 
-        if(_paymentToken.allowance(_to, address(this)) < _price) revert Underpaid();
-        _paymentToken.safeTransferFrom(_to, address(this), _price);
-        Energy(energyToken).mint(_to, _amount);
+    address _to = _msgSender();
+    uint256 _price = fixedExchangeRate[_paymentTokenAddress] * _amount;
+    uint256 _priceToEnrg = (_price * 80) / 100; // 80% of _price
+    uint256 _priceToHdao = _price - _priceToEnrg; // Remaining 20%
 
-        emit Mint(_to, _amount, _paymentTokenAddress, _price);
-    }
+        
+    // Check if allowance is sufficient
+    uint256 allowed = _paymentToken.allowance(_to, address(this));
+    if(allowed < _price/(10**2)) { revert("Underpaid");}
+
+    // Should only proceed if transfer was successful
+    _paymentToken.safeTransferFrom(_to, address(this), _price / (10**2));
+
+    //Swap 20% to hdao and check for success
+    _swapStablePaymentTokens(_priceToHdao /10**2, _paymentTokenAddress, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+
+    // Now mint energy
+    Energy(energyToken).mint(_to, _amount);
+    
+    //Log event to transaction
+    emit Mint(_to, _amount, _paymentTokenAddress, _price /(10 ** 2));
+}
+
 
     /**
      * Minting with dynamic exchange rate (HDAO, BAL, AAVE, etc.).
@@ -204,6 +271,8 @@ contract Factory is Ownable, ReentrancyGuard {
     {
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_amount > maxMintAmount) revert MaxMintAmount();
+        if(_amount < 5) revert InvalidAmount("Amount must be at least 0.05 ENRG");
+        if(_amount % 5 != 0) revert InvalidAmount("Amount must be divisible by 5");
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
         if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
 
@@ -244,7 +313,7 @@ contract Factory is Ownable, ReentrancyGuard {
 
         address _from = _msgSender();
         IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
-        uint256 _price = burningPrice*_amount*10**_paymentToken.decimals();
+        uint256 _price = burningPrice*_amount*10**_paymentToken.decimals()/10**Energy(energyToken).decimals();
         if(_paymentToken.balanceOf(address(this)) < _price) revert NotEnoughFunds();
 
         Energy(energyToken).burn(_from, _amount);
@@ -289,9 +358,8 @@ contract Factory is Ownable, ReentrancyGuard {
         uint8 decimals = IERC20Metadata(_paymentTokenAddress).decimals();
         uint256 _tokenPrice = _getSwapPrice(1 * 10**decimals, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
         uint256 _ethPrice = _getSwapPrice(1 * 10**18, USDCWETH_POOLID, WETH_TOKEN_ADDRESS, USDC_TOKEN_ADDRESS) * 10**12; // USDC has only 6 decimals, we need to add some 0s
-        uint256 _tokenUSDCPrice = (_tokenPrice*_ethPrice) / 10**18;
-
-        return  (_amount * USDC_PRICE / _tokenUSDCPrice) * 10**18;
+        uint256 _tokenUSDCPrice = (_tokenPrice * _ethPrice) / 10**18;
+        return  ((((_amount*10**16) * (USDC_PRICE*10**12))/10**18) / _tokenUSDCPrice)*10**18;
     }
 
     /**
@@ -345,10 +413,10 @@ contract Factory is Ownable, ReentrancyGuard {
         uint256 _amount = _totalAmount*80/100;
 
         if(_token != HDAO_TOKEN_ADDRESS){
-            _swapPaymentTokens(_totalAmount-_amount, _token, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+            _swapDynamicPaymentTokens(_totalAmount-_amount, _token, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
         }
 
-        _swapPaymentTokens(_amount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
+        _swapDynamicPaymentTokens(_amount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
     }
 
     /**
@@ -360,7 +428,7 @@ contract Factory is Ownable, ReentrancyGuard {
      * @param _assetOut token to be swapped into
      * @param _poolOut (WETH-AssetOut Balancer pool id)
      */
-    function _swapPaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
+    function _swapDynamicPaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
         private
         returns (int256[] memory)
     {
@@ -369,6 +437,64 @@ contract Factory is Ownable, ReentrancyGuard {
         IVault.BatchSwapStep[] memory _swaps = new IVault.BatchSwapStep[](2);
         _swaps[0] = IVault.BatchSwapStep({
             poolId: dynamicExchangeTokens[_paymentToken],
+            assetInIndex: 0,
+            assetOutIndex: 1,
+            amount: _amount,
+            userData: new bytes(0)
+        });
+        _swaps[1] = IVault.BatchSwapStep({
+            poolId: _poolOut,
+            assetInIndex: 1,
+            assetOutIndex: 2,
+            amount: 0,
+            userData: new bytes(0)
+        });
+
+        IAsset[] memory _assets = new IAsset[](3);
+        _assets[0] = IAsset(_paymentToken);
+        _assets[1] = IAsset(WETH_TOKEN_ADDRESS);
+        _assets[2] = IAsset(_assetOut);
+
+        IVault.FundManagement memory _funds = IVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(address(this)),
+            toInternalBalance: false
+        });
+
+        int256[] memory _limits = new int256[](3);
+        _limits[0] = type(int256).max;
+        _limits[1] = type(int256).max;
+        _limits[2] = type(int256).max;
+
+        return BalancerVault.batchSwap(
+            IVault.SwapKind.GIVEN_IN,
+            _swaps,
+            _assets,
+            _funds,
+            _limits,
+            type(uint256).max
+        );
+    }
+
+        /**
+     * Swap tokens using Balancer.
+     * It first exchanges the stable coins to weth then the target asset _assetOut
+     * 
+     * @param _amount of tokens to swap
+     * @param _paymentToken is the initial token to be swapped
+     * @param _assetOut token to be swapped into
+     * @param _poolOut (WETH-AssetOut Balancer pool id)
+     */
+    function _swapStablePaymentTokens(uint256 _amount, address _paymentToken, address _assetOut, bytes32 _poolOut)
+        private
+        returns (int256[] memory)
+    {
+        IERC20Metadata(_paymentToken).approve(address(BalancerVault), _amount);
+
+        IVault.BatchSwapStep[] memory _swaps = new IVault.BatchSwapStep[](2);
+        _swaps[0] = IVault.BatchSwapStep({
+            poolId: stableExchangeTokens[_paymentToken],
             assetInIndex: 0,
             assetOutIndex: 1,
             amount: _amount,
