@@ -22,7 +22,8 @@ contract Factory is Ownable, ReentrancyGuard {
     address immutable WETH_TOKEN_ADDRESS = 0x303d53087ABBbe343e2360BB288275Ddba47A6b6;
     bytes32 immutable USDCWETH_POOLID = 0x20f69a6fe6b518423c6d78845daa36770e5ed3fa000200000000000000000059;
     bytes32 immutable HDAOWETH_POOLID = 0xc59df746f926663744ab3d10f9e71dc87a2f94e000020000000000000000005b;
-    IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
+    //Sepolia
+    IBalancerQueries immutable BalancerQueries = IBalancerQueries(0x1802953277FD955f9a254B80Aa0582f193cF1d77);
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
     uint256 immutable USDC_PRICE = 25 * 10**5;
 
@@ -274,7 +275,7 @@ function mint(uint256 _amount, address _paymentTokenAddress)
         if(_amount < 5) revert InvalidAmount("Amount must be at least 0.05 ENRG");
         if(_amount % 5 != 0) revert InvalidAmount("Amount must be divisible by 5");
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-        if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
+        if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0) && _paymentTokenAddress != WETH_TOKEN_ADDRESS) revert InvalidParamsZeroValue();
 
         address _to = _msgSender();
 
@@ -296,7 +297,11 @@ function mint(uint256 _amount, address _paymentTokenAddress)
         IERC20Metadata(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
-        _swapPaymentTokenToHDAOAndUSDC(_price, _paymentTokenAddress);
+        if(_paymentTokenAddress == WETH_TOKEN_ADDRESS){
+            _swapPaymentWETHToHDAOAndUSDC(_price);
+        } else {
+            _swapPaymentTokenToHDAOAndUSDC(_price, _paymentTokenAddress);
+        }
 
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
@@ -353,13 +358,19 @@ function mint(uint256 _amount, address _paymentTokenAddress)
     {
         if(_amount == 0) revert InvalidParamsZeroValue();
         if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-        if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
 
         uint8 decimals = IERC20Metadata(_paymentTokenAddress).decimals();
-        uint256 _tokenPrice = _getSwapPrice(1 * 10**decimals, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
+
         uint256 _ethPrice = _getSwapPrice(1 * 10**18, USDCWETH_POOLID, WETH_TOKEN_ADDRESS, USDC_TOKEN_ADDRESS) * 10**12; // USDC has only 6 decimals, we need to add some 0s
-        uint256 _tokenUSDCPrice = (_tokenPrice * _ethPrice) / 10**18;
-        return  ((((_amount*10**16) * (USDC_PRICE*10**12))/10**18) / _tokenUSDCPrice)*10**18;
+        uint256 _tokenUSDCPrice = _ethPrice;
+
+        if(_paymentTokenAddress != WETH_TOKEN_ADDRESS){ // If the payment token is not WETH, we need to calculate the price
+            if(dynamicExchangeTokens[_paymentTokenAddress] == bytes32(0)) revert InvalidParamsZeroValue();
+            uint256 _tokenPrice = _getSwapPrice(1 * 10**decimals, dynamicExchangeTokens[_paymentTokenAddress], _paymentTokenAddress, WETH_TOKEN_ADDRESS);
+            _tokenUSDCPrice = (_tokenPrice*_ethPrice) / 10**18;
+            return  ((((_amount*10**16) * (USDC_PRICE*10**12))/10**18) / _tokenUSDCPrice)*10**18;
+        }
+        return (_amount * (USDC_PRICE*10**12) * 10**16) / _tokenUSDCPrice;
     }
 
     /**
@@ -533,5 +544,47 @@ function mint(uint256 _amount, address _paymentTokenAddress)
             _limits,
             type(uint256).max
         );
+    }
+
+        /**
+     * Swaps the totalAmount of WETH to HDAO and USDC
+     * 
+     * @param _totalAmount of WETH to swap
+     */
+    function _swapPaymentWETHToHDAOAndUSDC(uint256 _totalAmount)
+        private
+    {
+        if(_totalAmount == 0) revert InvalidParamsZeroValue();
+
+        // Swap some (80%, $2 for every $2.5) $HDAO to USDC
+        address _token = WETH_TOKEN_ADDRESS;
+        uint256 _USDCAmount = _totalAmount*80/100;
+
+        IVault.FundManagement memory _funds = IVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(address(this)),
+            toInternalBalance: false
+        });
+
+        IERC20Metadata(_token).approve(address(BalancerVault), _totalAmount);
+
+        BalancerVault.swap(IVault.SingleSwap({
+            poolId: HDAOWETH_POOLID,
+            kind: IVault.SwapKind.GIVEN_IN,
+            assetIn: IAsset(_token),
+            assetOut: IAsset(HDAO_TOKEN_ADDRESS),
+            amount: _totalAmount-_USDCAmount,
+            userData: new bytes(0)
+        }), _funds, 0, type(uint256).max);
+
+        BalancerVault.swap(IVault.SingleSwap({
+            poolId: USDCWETH_POOLID,
+            kind: IVault.SwapKind.GIVEN_IN,
+            assetIn: IAsset(_token),
+            assetOut: IAsset(USDC_TOKEN_ADDRESS),
+            amount: _USDCAmount,
+            userData: new bytes(0)
+        }), _funds, 0, type(uint256).max);
     }
 }
