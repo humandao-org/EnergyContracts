@@ -5,6 +5,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract EnergyEscrow is Ownable {
+
+    mapping(address => bool) private _authorized;
+    address[] private _authorizedList;
     
     struct Recipient {
         //This is to allow Allow multiple completions from the same assistant
@@ -66,31 +69,22 @@ contract EnergyEscrow is Ownable {
      * @param claimableAmount claimable amount
      * @param refundableAmount refundable amount
      */
-    function setAmounts(bytes32 uuid, uint256 claimableAmount, uint256 refundableAmount) external onlyOwner {
+    function setAmounts(bytes32 uuid, uint256 claimableAmount, uint256 refundableAmount, uint32 assistantCount) external onlyOwner {
         Deposit storage uniqueDeposit = deposits[uuid];
-        require(uniqueDeposit.amount >= claimableAmount + refundableAmount, "EnergyEscrow::setAmounts: total amount is not equal to the remaining balance");
-        uniqueDeposit.claimableAmount = claimableAmount;
-        uniqueDeposit.refundableAmount = refundableAmount;
-    }
-
-    /**
-     * Used when owner creates a task / owner edits a multi task
-     * @param uuid deposit uuid
-     * @param assistantCount max assignment
-     */
-    function setAssistantCount(bytes32 uuid, uint32 assistantCount) external onlyOwner {
-        Deposit storage uniqueDeposit = deposits[uuid];
-        require(assistantCount > 0, "EnergyEscrow::setAssistantCount: assistantCount value cannot be less than 0");
-        uint256 enrgToRefund = uniqueDeposit.assistantCount != 0 ? uniqueDeposit.amount / uniqueDeposit.assistantCount : 0;
-        //Check if this is used for updating task and lowering the assistant count, automatic refund
-        if(uniqueDeposit.assistantCount != 0 && uniqueDeposit.assistantCount < assistantCount) {
-            ENRG.transfer(uniqueDeposit.depositor, enrgToRefund)  ;
+        if(assistantCount == 1) {
+            require(uniqueDeposit.amount >= claimableAmount + refundableAmount, "EnergyEscrow::setAmounts: total amount is not equal to the remaining balance");
         }
 
+        uniqueDeposit.claimableAmount = claimableAmount;
+        uniqueDeposit.refundableAmount = refundableAmount;
+        //If assistant count lowers. automatic refund
+        if(uniqueDeposit.assistantCount != 0 && uniqueDeposit.assistantCount < assistantCount) {
+            uint256 enrgToRefund =  uniqueDeposit.claimableAmount * (uniqueDeposit.assistantCount-assistantCount);
+            ENRG.transfer(uniqueDeposit.depositor, enrgToRefund);
+            uniqueDeposit.amount -= enrgToRefund;
+            uniqueDeposit.refundableAmount -= enrgToRefund;
+        }
         uniqueDeposit.assistantCount = assistantCount;
-        
-        //Remove if unnecessary
-        uniqueDeposit.refundableAmount = uniqueDeposit.amount;
     }
 
     /**
@@ -111,20 +105,18 @@ contract EnergyEscrow is Ownable {
             recipientAddress: recipient,
             uuid: recipientUuid
         });
-        
-
         uniqueDeposit.recipients.push(newRecipient);
     }
 
     /**
      * Used after assistant accomplishes the task
      * @param uuid deposit uuid
-     * @param recipientAddress recipient address
+     * @param recUuid recipient uuid
      */
-    function setClaimable(bytes32 uuid, address recipientAddress, bytes32 recUuid) external onlyOwner {
+    function setClaimable(bytes32 uuid, bytes32 recUuid) external onlyOwner {
         Deposit storage uniqueDeposit = deposits[uuid];
         for(uint i = 0; i < uniqueDeposit.recipients.length; i++) { 
-            if(recipientAddress == uniqueDeposit.recipients[i].recipientAddress && uniqueDeposit.recipients[i].uuid == recUuid) {
+            if(uniqueDeposit.recipients[i].uuid == recUuid) {
                 uniqueDeposit.recipients[i].claimable = true;
                 break;
             }
@@ -132,42 +124,80 @@ contract EnergyEscrow is Ownable {
     }
 
 
+    // /**
+    //  * Used by assistants when claiming
+    //  * @param uuid deposit uuid
+    //  * @param recipientUuid recipient uuid
+    //  */
+    // function claim(bytes32 uuid, bytes32 recipientUuid) external {
+    //     Deposit storage uniqueDeposit = deposits[uuid];
+    //     require(uniqueDeposit.recipients.length > 0, "EnergyEscrow::claim: no recipients");
+    //     uint256 individualClaimAmount = uniqueDeposit.claimableAmount;
+
+    //     for(uint i = 0; i < uniqueDeposit.recipients.length; i++) {
+            
+    //         if(msg.sender == uniqueDeposit.recipients[i].recipientAddress && recipientUuid == uniqueDeposit.recipients[i].uuid) {
+    //             //For single instance tasks 
+    //             if (uniqueDeposit.assistantCount == 1){
+    //                 require(individualClaimAmount > 0, "EnergyEscrow::claim: nothing to claim");
+    //                 require(!uniqueDeposit.recipients[i].claimed, "EnergyEscrow::claim: Already claimed");
+    //                 require(uniqueDeposit.recipients[i].claimable, "EnergyEscrow::claim: Deposit is still not claimable");
+    //                 uniqueDeposit.amount -= individualClaimAmount;
+    //                 uniqueDeposit.refundableAmount -= individualClaimAmount;
+    //                 uniqueDeposit.recipients[i].claimed = true;
+    //                 ENRG.transfer(msg.sender, individualClaimAmount);
+    //                 return;
+    //             }
+                
+    //             //For missions and multi-tasks
+    //             else {
+    //                 require(individualClaimAmount > 0, "EnergyEscrow::claim: nothing to claim");
+    //                 require(!uniqueDeposit.recipients[i].claimed, "EnergyEscrow::claim: Already claimed");
+    //                 require(uniqueDeposit.recipients[i].claimable, "EnergyEscrow::claim: Deposit is still not claimable");
+    //                 uniqueDeposit.amount -= individualClaimAmount;
+    //                 uniqueDeposit.refundableAmount -= individualClaimAmount;
+    //                 uniqueDeposit.recipients[i].claimed = true;
+    //                 ENRG.transfer(msg.sender, individualClaimAmount);
+    //                 break;
+    //             }
+    //         } 
+    //     }
+    // }
+    
     /**
      * Used by assistants when claiming
      * @param uuid deposit uuid
      * @param recipientUuid recipient uuid
      */
     function claim(bytes32 uuid, bytes32 recipientUuid) external {
-        Deposit storage uniqueDeposit = deposits[uuid];
-        require(uniqueDeposit.recipients.length > 0, "EnergyEscrow::claim: no recipients");
-        uint256 individualClaimAmount = uniqueDeposit.claimableAmount > 0 ? uniqueDeposit.claimableAmount : uniqueDeposit.amount;
+    Deposit storage uniqueDeposit = deposits[uuid];
+    require(uniqueDeposit.recipients.length > 0, "EnergyEscrow::claim: no recipients");
+    uint256 individualClaimAmount = uniqueDeposit.claimableAmount;
+    bool isClaimed = false;
 
-        for(uint i = 0; i < uniqueDeposit.recipients.length; i++) {
-            
-            if(msg.sender == uniqueDeposit.recipients[i].recipientAddress && recipientUuid == uniqueDeposit.recipients[i].uuid) {
-                //For single instance tasks 
-                if (uniqueDeposit.assistantCount == 1){
-                    require(individualClaimAmount > 0, "EnergyEscrow::claim: nothing to claim");
-                    require(!uniqueDeposit.recipients[i].claimed, "EnergyEscrow::claim: Already claimed");
-                    require(uniqueDeposit.recipients[i].claimable, "EnergyEscrow::claim: Deposit is still not claimable");
-                    uniqueDeposit.amount -= individualClaimAmount;
-                    uniqueDeposit.recipients[i].claimed = true;
-                    return;
-                }
-                
-                //For missions and multi-tasks
-                else {
-                    require(individualClaimAmount > 0, "EnergyEscrow::claim: nothing to claim");
-                    require(!uniqueDeposit.recipients[i].claimed, "EnergyEscrow::claim: Already claimed");
-                    require(uniqueDeposit.recipients[i].claimable, "EnergyEscrow::claim: Deposit is still not claimable");
-                    uniqueDeposit.amount -= individualClaimAmount;
-                    uniqueDeposit.recipients[i].claimed = true;
-                    ENRG.transfer(msg.sender, individualClaimAmount);
-                    break;
-                }
-            } 
+    for(uint i = 0; i < uniqueDeposit.recipients.length && !isClaimed; i++) {
+        Recipient storage recipient = uniqueDeposit.recipients[i];
+        if(msg.sender == recipient.recipientAddress && recipientUuid == recipient.uuid && recipient.claimable && !recipient.claimed) {
+            require(individualClaimAmount > 0, "EnergyEscrow::claim: nothing to claim");
+            require(recipient.claimable, "EnergyEscrow::claim: Reward should be claimable");
+            require(!recipient.claimed, "EnergyEscrow::claim: Reward is already claimed");
+            uniqueDeposit.amount -= individualClaimAmount;
+            if(uniqueDeposit.assistantCount > 1) {
+                    uniqueDeposit.claimableAmount = 0;
+                    uniqueDeposit.refundableAmount = 0;
+            }
+            else {
+                uniqueDeposit.refundableAmount -= individualClaimAmount;
+            }
+
+            recipient.claimed = true;
+            ENRG.transfer(msg.sender, individualClaimAmount);
+            isClaimed = true;
         }
     }
+    require(isClaimed, "EnergyEscrow::claim: Not eligible for claim");
+}
+
 
     /**
      * Specifically for refunds (setting tasks to draft/deleting tasks)
@@ -183,7 +213,6 @@ contract EnergyEscrow is Ownable {
         ENRG.transfer(uniqueDeposit.depositor, refundable);
     }
     
-
     /**
      * Specifically for owners wanting to remove assistants from a task
      * @param uuid deposit uuid
