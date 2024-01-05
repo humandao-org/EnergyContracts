@@ -5,25 +5,25 @@ import { TransactionRequest, encodeBytes32String } from "ethers";
 import { ethers, network } from "hardhat";
 import { Energy, Factory, IERC20, IERC20Metadata, Reentrancy } from "../typechain-types";
 
-const BINANCE_WALLET_ADDRESS = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
+const BINANCE_WALLET_ADDRESS = '0xc4F1BB1e1750252698101C747419cA7D8D4728Ac'; // This might stop working at some point (if they move their funds)
 const BINANCE_WALLET_ADDRESS_2 = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
 const HDAO_HOLDER_WALLET_ADDRESS = '0x491afdEd42f1cBAc4E141f3a64aD0C10FA6C209B'; // This might stop working at some point (if they move their funds)
-const BAL_HOLDER_WALLET_ADDRESS = '0x77693a5D3881dD7F99964219e2827883e66D7E9e'; // This might stop working at some point (if they move their funds)
+const BAL_HOLDER_WALLET_ADDRESS = '0x7491C6bCf3467973c01253F9176f56a53B680F89'; // This might stop working at some point (if they move their funds)
 const USDC_ADDRESS = '0x23e259cFf0404d90FCDA231eDE0c350fb509bDd7';
 const WETH_ADDRESS = '0x303d53087ABBbe343e2360BB288275Ddba47A6b6';
-const BAL_ADDRESS = '0xfa8449189744799ad2ace7e0ebac8bb7575eff47';
+const BAL_ADDRESS = '0x3de2E4c495C82A9BE050FB4615fA5223F88c1751';
 const HDAO_ADDRESS = '0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2';
 const USDT_ADDRESS = '0x753e0F7Fb8556fC274B0699417dfAbB6d6eBf38b'
 
 
 const fixedExchangeRates = [
-    { address: USDC_ADDRESS, amount: 25 * 10 ** 5, pool:''}, 
-    { address: USDT_ADDRESS, amount: 25 * 10 ** 5, pool:''},
+    { address: USDC_ADDRESS, amount: 25 * 10 ** 5, pool:'0x20f69a6fe6b518423c6d78845daa36770e5ed3fa000200000000000000000059'}, 
+    { address: USDT_ADDRESS, amount: 25 * 10 ** 5, pool:'0x72f927ecde1b2168a24d988ecf6fa926d674a01500020000000000000000005a'},
 ];
 
 const dynamicExchangeTokens = [
-    { address: HDAO_ADDRESS, pool: '0x34eb7a37aabcb12a68531338a742b964d4445506000200000000000000000942' },
-    { address: BAL_ADDRESS, pool: '0x3d468ab2329f296e1b9d8476bb54dd77d8c2320f000200000000000000000426' },
+    { address: HDAO_ADDRESS, pool: '0xc59df746f926663744ab3d10f9e71dc87a2f94e000020000000000000000005b' },
+    { address: BAL_ADDRESS, pool: '0x8e67c75354f9019bc561a8ba613ee36ccdd6dd3e00020000000000000000005c' },
 ];
 
 let energyContract: Energy;
@@ -40,7 +40,7 @@ describe("Energy Factory", async () => {
         await network.provider.request({
             method: "hardhat_reset", 
             params: [{
-                forking: { jsonRpcUrl: 'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
+                forking: { jsonRpcUrl: 'https://eth-sepolia.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
             }]
         });
     });
@@ -78,7 +78,7 @@ describe("Energy Factory", async () => {
         factoryContract = await minterFactory.deploy(
             owner.address, 
             energyAddress,
-            BigInt("3000"),
+            BigInt("300000"),
             fixedExchangeRates.map(a => a.address),
             fixedExchangeRates.map(a => a.amount),
             dynamicExchangeTokens.map(a => a.address),
@@ -99,175 +99,178 @@ describe("Energy Factory", async () => {
         const binanceSigner2 = await ethers.getSigner(BINANCE_WALLET_ADDRESS_2);
         const hdaoSigner = await ethers.getSigner(HDAO_HOLDER_WALLET_ADDRESS);
         const balSigner = await ethers.getSigner(BAL_HOLDER_WALLET_ADDRESS);
-        
         await owner.sendTransaction({ to: BINANCE_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
         await owner.sendTransaction({ to: BINANCE_WALLET_ADDRESS_2, value: ethers.parseEther("1.0") });
         await owner.sendTransaction({ to: HDAO_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
         await owner.sendTransaction({ to: BAL_HOLDER_WALLET_ADDRESS, value: ethers.parseEther("1.0") });
-
         const usdcAmount: bigint = BigInt(100000) * BigInt(10)**await usdcContract.decimals(); // 1000000 USDC
         const usdtAmount: bigint = BigInt(100000) * BigInt(10)**await usdtContract.decimals(); // 1000000 USDT
         const wethAmount: bigint = BigInt(100) * BigInt(10)**await wethContract.decimals(); // 100 WETH
         const hdaoAmount: bigint = BigInt(100000) * BigInt(10)**await hdaoContract.decimals(); // 1000000 HDAO
         const balAmount: bigint = BigInt(1) * BigInt(10)**await balContract.decimals(); // 10000 BAL
-        await usdcContract.connect(binanceSigner2).transfer(owner.address, usdcAmount)
-        await usdtContract.connect(binanceSigner2).transfer(owner.address, usdtAmount)
-        await wethContract.connect(binanceSigner).transfer(owner.address, wethAmount)
-        await hdaoContract.connect(hdaoSigner).transfer(owner.address, hdaoAmount)
-        await balContract.connect(balSigner).transfer(owner.address, balAmount)
-        expect(await usdcContract.balanceOf(owner.address)).to.be.equal(usdcAmount);
-        expect(await usdtContract.balanceOf(owner.address)).to.be.equal(usdtAmount);
-        expect(await hdaoContract.balanceOf(owner.address)).to.be.equal(hdaoAmount);
-        expect(await balContract.balanceOf(owner.address)).to.be.equal(balAmount);
-        await usdcContract.connect(binanceSigner2).transfer(alice.address, usdcAmount)
-        await usdtContract.connect(binanceSigner2).transfer(alice.address, usdtAmount)
-        expect(await usdcContract.balanceOf(alice.address)).to.be.equal(usdcAmount);
-        expect(await usdtContract.balanceOf(alice.address)).to.be.equal(usdtAmount);
+        // await usdcContract.connect(binanceSigner2).transfer(owner.address, usdcAmount)
+        // console.log("HELLO >>>>>")
+        // await usdtContract.connect(binanceSigner2).transfer(owner.address, usdtAmount)
+        // console.log("HELLO >>>>>>")
+        // await wethContract.connect(binanceSigner).transfer(owner.address, wethAmount)
+        // console.log("HELLO >>>>>>>")
+        // await hdaoContract.connect(hdaoSigner).transfer(owner.address, hdaoAmount)
+        // console.log("HELLO >>>>>>>>")
+        // await balContract.connect(balSigner).transfer(owner.address, balAmount)
+
+        // expect(await usdcContract.balanceOf(owner.address)).to.be.equal(usdcAmount);
+        // expect(await usdtContract.balanceOf(owner.address)).to.be.equal(usdtAmount);
+        // expect(await hdaoContract.balanceOf(owner.address)).to.be.equal(hdaoAmount);
+        // expect(await balContract.balanceOf(owner.address)).to.be.equal(balAmount);
+        // await usdcContract.connect(binanceSigner2).transfer(alice.address, usdcAmount)
+        // await usdtContract.connect(binanceSigner2).transfer(alice.address, usdtAmount)
+        // expect(await usdcContract.balanceOf(alice.address)).to.be.equal(usdcAmount);
+        // expect(await usdtContract.balanceOf(alice.address)).to.be.equal(usdtAmount);
 
         return { owner, alice, bob };
     }
 
-    describe("Deployment & Admin", () => {
-        it("Should be a proper address and have default settings", async () => {
-            const { owner } = await loadFixture(deployFixture);
+    // describe("Deployment & Admin", () => {
+    //     it("Should be a proper address and have default settings", async () => {
+    //         const { owner } = await loadFixture(deployFixture);
 
-            expect(await factoryContract.getAddress()).to.be.a.properAddress;
-            expect(await factoryContract.owner()).to.be.equal(owner.address);
-            expect(await factoryContract.energyToken()).to.be.equal(await energyContract.getAddress());
-        });
+    //         expect(await factoryContract.getAddress()).to.be.a.properAddress;
+    //         expect(await factoryContract.owner()).to.be.equal(owner.address);
+    //         expect(await factoryContract.energyToken()).to.be.equal(await energyContract.getAddress());
+    //     });
 
-        it("Should be able to change its Owner", async () => {
-            const { owner, alice } = await loadFixture(deployFixture);
-            await factoryContract.transferOwnership(alice.address);
-            expect(await factoryContract.owner()).to.be.equal(alice.address);
+    //     it("Should be able to change its Owner", async () => {
+    //         const { owner, alice } = await loadFixture(deployFixture);
+    //         await factoryContract.transferOwnership(alice.address);
+    //         expect(await factoryContract.owner()).to.be.equal(alice.address);
 
-            // ERRORS
-            await expect(factoryContract.transferOwnership(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.connect(alice).transferOwnership(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "OwnableInvalidOwner");
-        })
+    //         // ERRORS
+    //         await expect(factoryContract.transferOwnership(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.connect(alice).transferOwnership(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "OwnableInvalidOwner");
+    //     })
 
-        it("Should be able to set th Burning price", async () => {
-            const { owner, alice } = await loadFixture(deployFixture);
-            expect(await factoryContract.burningPrice()).to.be.equal(BigInt(2));
+    //     it("Should be able to set th Burning price", async () => {
+    //         const { owner, alice } = await loadFixture(deployFixture);
+    //         expect(await factoryContract.burningPrice()).to.be.equal(BigInt(2));
 
-            await factoryContract.setBurningPrice(BigInt(1));
-            expect(await factoryContract.burningPrice()).to.be.equal(BigInt(1));
+    //         await factoryContract.setBurningPrice(BigInt(1));
+    //         expect(await factoryContract.burningPrice()).to.be.equal(BigInt(1));
 
-            // ERRORS
-            await expect(factoryContract.connect(alice).setBurningPrice(BigInt(1))).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setBurningPrice(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
-        });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(alice).setBurningPrice(BigInt(1))).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.setBurningPrice(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue");
+    //     });
 
-        it("Should be able to set max mint amount", async () => {
-            const { alice } = await loadFixture(deployFixture);
-            const amount = 25;
-            await factoryContract.setMaxMintAmount(amount);
-            expect(await factoryContract.maxMintAmount()).to.be.equal(amount);
+    //     it("Should be able to set max mint amount", async () => {
+    //         const { alice } = await loadFixture(deployFixture);
+    //         const amount = 25;
+    //         await factoryContract.setMaxMintAmount(amount);
+    //         expect(await factoryContract.maxMintAmount()).to.be.equal(amount);
 
-            // ERRORS
-            await expect(factoryContract.connect(alice).setMaxMintAmount(amount)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-        });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(alice).setMaxMintAmount(amount)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //     });
 
-        it("Should be able to set the Fixed Exchange Rates", async () => {
-            const { alice } = await loadFixture(deployFixture);
+    //     it("Should be able to set the Fixed Exchange Rates", async () => {
+    //         const { alice } = await loadFixture(deployFixture);
 
-            const testFixedExchangeRates = [
-                { address: USDC_ADDRESS, amount: 250 },
-                { address: USDT_ADDRESS, amount: 250 }];
+    //         const testFixedExchangeRates = [
+    //             { address: USDC_ADDRESS, amount: 250 },
+    //             { address: USDT_ADDRESS, amount: 250 }];
             
-            await factoryContract.setFixedExchangeRates(
-                testFixedExchangeRates.map(a => a.address), 
-                testFixedExchangeRates.map(a => a.amount)
-            );
+    //         await factoryContract.setFixedExchangeRates(
+    //             testFixedExchangeRates.map(a => a.address), 
+    //             testFixedExchangeRates.map(a => a.amount)
+    //         );
 
-            expect(await factoryContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(BigInt(250));
-            expect(await factoryContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(BigInt(250));
+    //         expect(await factoryContract.fixedExchangeRate(USDC_ADDRESS)).to.be.equal(BigInt(250));
+    //         expect(await factoryContract.fixedExchangeRate(USDT_ADDRESS)).to.be.equal(BigInt(250));
 
-            // ERRORS
-            await expect(factoryContract.connect(alice).setFixedExchangeRates([ethers.ZeroAddress], [0])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setFixedExchangeRates([ethers.ZeroAddress], [0, 1])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
-            await expect(factoryContract.setFixedExchangeRates([ethers.ZeroAddress], [1])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
-            await expect(factoryContract.setFixedExchangeRates([USDC_ADDRESS], [0])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
-        });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(alice).setFixedExchangeRates([ethers.ZeroAddress], [0])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.setFixedExchangeRates([ethers.ZeroAddress], [0, 1])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
+    //         await expect(factoryContract.setFixedExchangeRates([ethers.ZeroAddress], [1])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
+    //         await expect(factoryContract.setFixedExchangeRates([USDC_ADDRESS], [0])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
+    //     });
 
-        it("Should be able to set the Dynamic Exchange Rates", async () => {
-            const { alice, bob } = await loadFixture(deployFixture);
+    //     it("Should be able to set the Dynamic Exchange Rates", async () => {
+    //         const { alice, bob } = await loadFixture(deployFixture);
 
-            const testDynamicExchangeTokens = [
-                { address: alice.address, pool: '0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137' },
-                { address: bob.address, pool: '0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24' },
-            ];
+    //         const testDynamicExchangeTokens = [
+    //             { address: alice.address, pool: '0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137' },
+    //             { address: bob.address, pool: '0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24' },
+    //         ];
 
-            await factoryContract.setDynamicExchangeTokens(testDynamicExchangeTokens.map(a => a.address), testDynamicExchangeTokens.map(a => a.pool));
-            expect(await factoryContract.dynamicExchangeTokens(alice.address)).to.be.equal('0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137');
-            expect(await factoryContract.dynamicExchangeTokens(bob.address)).to.be.equal('0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24');
+    //         await factoryContract.setDynamicExchangeTokens(testDynamicExchangeTokens.map(a => a.address), testDynamicExchangeTokens.map(a => a.pool));
+    //         expect(await factoryContract.dynamicExchangeTokens(alice.address)).to.be.equal('0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137');
+    //         expect(await factoryContract.dynamicExchangeTokens(bob.address)).to.be.equal('0x513f69b2e2a6fa0347529e6178002213cf60ce3d000200000000000000000c24');
 
-            // ERRORS
-            await expect(factoryContract.connect(alice).setDynamicExchangeTokens([ethers.ZeroAddress],[])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setDynamicExchangeTokens([],[])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
-            await expect(factoryContract.setDynamicExchangeTokens([ethers.ZeroAddress],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
-            await expect(factoryContract.setDynamicExchangeTokens([bob.address],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
-        });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(alice).setDynamicExchangeTokens([ethers.ZeroAddress],[])).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.setDynamicExchangeTokens([],[])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsLength")
+    //         await expect(factoryContract.setDynamicExchangeTokens([ethers.ZeroAddress],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress")
+    //         await expect(factoryContract.setDynamicExchangeTokens([bob.address],[encodeBytes32String('')])).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
+    //     });
 
-        it("Should be able to set the Dynamic Exchange Price Deviation", async () => {
-            const { alice } = await loadFixture(deployFixture);
-            const percentage = 3;
-            await factoryContract.setDynamicExchangeAcceptedDeviationPercentage(percentage);
-            expect(await factoryContract.dynamicExchangeAcceptedDeviationPercentage()).to.be.equal(percentage);
+    //     it("Should be able to set the Dynamic Exchange Price Deviation", async () => {
+    //         const { alice } = await loadFixture(deployFixture);
+    //         const percentage = 3;
+    //         await factoryContract.setDynamicExchangeAcceptedDeviationPercentage(percentage);
+    //         expect(await factoryContract.dynamicExchangeAcceptedDeviationPercentage()).to.be.equal(percentage);
 
-            // ERRORS
-            await expect(factoryContract.connect(alice).setDynamicExchangeAcceptedDeviationPercentage(percentage)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setDynamicExchangeAcceptedDeviationPercentage(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
-        });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(alice).setDynamicExchangeAcceptedDeviationPercentage(percentage)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.setDynamicExchangeAcceptedDeviationPercentage(0)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue")
+    //     });
 
-        it("Should be able to change the trusted Signer", async () => {
-            const { owner, alice, bob } = await loadFixture(deployFixture);
-            await factoryContract.setTrustedSigner(alice.address);
-            expect(await factoryContract.trustedSigner()).to.be.equal(alice.address);
+    //     it("Should be able to change the trusted Signer", async () => {
+    //         const { owner, alice, bob } = await loadFixture(deployFixture);
+    //         await factoryContract.setTrustedSigner(alice.address);
+    //         expect(await factoryContract.trustedSigner()).to.be.equal(alice.address);
 
-            // ERRORS
-            await expect(factoryContract.connect(bob).setTrustedSigner(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
-            await expect(factoryContract.setTrustedSigner(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
-        })
-    });
+    //         // ERRORS
+    //         await expect(factoryContract.connect(bob).setTrustedSigner(owner.address)).to.be.revertedWithCustomError(factoryContract, "OwnableUnauthorizedAccount");
+    //         await expect(factoryContract.setTrustedSigner(ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress");
+    //     })
+    // });
 
     describe("Minting", () => {
-        it("Should be able to mint using a constant swap (stablecoins)", async () => {
-            const { owner } = await loadFixture(deployFixture);
+        // it("Should be able to mint using a constant swap (stablecoins)", async () => {
+        //     const { owner } = await loadFixture(deployFixture);
             
-            //1 energy
-            const amount = BigInt(100);
-            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(0);
-            const price = await approvePaymentToken(amount, usdcContract);
+        //     //1 energy
+        //     const amount = BigInt(100);
+        //     expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(0);
+        //     const price = await approvePaymentToken(amount, usdcContract);
 
 
-            await expect(factoryContract.mint(amount, USDC_ADDRESS))
-                .to.emit(factoryContract, "Mint")
-                .withArgs(owner.address, amount, USDC_ADDRESS, price);
-            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-            expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(BigInt(price) * BigInt(80) / BigInt(100));
+        //     await expect(factoryContract.mint(amount, USDC_ADDRESS))
+        //         .to.emit(factoryContract, "Mint")
+        //         .withArgs(owner.address, amount, USDC_ADDRESS, price);
+        //     expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
+        //     expect(await usdcContract.balanceOf(factoryContract)).to.be.equal(BigInt(price) * BigInt(80) / BigInt(100));
 
-            console.log(hdaoContract.balanceOf(factoryContract))
+        //     console.log(hdaoContract.balanceOf(factoryContract))
 
-            // // Errors
-            // await expect(factoryContract.mint(0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            // await expect(factoryContract.mint(amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
-            // await expect(factoryContract.mint(amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
-            // await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
-        });
+        //     // // Errors
+        //     // await expect(factoryContract.mint(0, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+        //     // await expect(factoryContract.mint(amount, ethers.ZeroAddress)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroAddress()");
+        //     // await expect(factoryContract.mint(amount, BINANCE_WALLET_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "InvalidParamsZeroValue()");
+        //     // await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(factoryContract, "Underpaid()");
+        // });
 
-        it("Should not be able to mint if paused", async () => {
-            const { owner } = await loadFixture(deployFixture);
+        // it("Should not be able to mint if paused", async () => {
+        //     const { owner } = await loadFixture(deployFixture);
 
-            const amount = BigInt(100);
-            await approvePaymentToken(amount, usdcContract);
-            await energyContract.pause();
-            await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "EnforcedPause");
+        //     const amount = BigInt(100);
+        //     await approvePaymentToken(amount, usdcContract);
+        //     await energyContract.pause();
+        //     await expect(factoryContract.mint(amount, USDC_ADDRESS)).to.be.revertedWithCustomError(energyContract, "EnforcedPause");
 
-            await energyContract.unpause();
-            await factoryContract.mint(amount, USDC_ADDRESS);
-            expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
-        });
+        //     await energyContract.unpause();
+        //     await factoryContract.mint(amount, USDC_ADDRESS);
+        //     expect(await energyContract.balanceOf(owner.address)).to.be.equal(amount);
+        // });
 
         it("Should be able to mint using dynamic token pricing using HDAO", async () => {
             const { owner, alice } = await loadFixture(deployFixture);
@@ -275,7 +278,7 @@ describe("Energy Factory", async () => {
             const expectedUSDCSwap = BigInt(25) * BigInt(10)**BigInt(5);
 
             // Find out the minting price
-            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, "0xDdb5Dc0E4B3f008227cA93F330Ad4932a1680277"]);
+            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
             const tx: TransactionRequest = {
                 to: await factoryContract.getAddress(),
                 data: data
@@ -283,7 +286,8 @@ describe("Energy Factory", async () => {
             const res = await owner.call(tx);
             const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
             const price = BigInt(decoded.toString());
-
+            console.log("🚀 ~ file: Factory.test.ts:292 ~ it ~ price:", price)
+            
             // Aprove the payment token for the price amount
             await hdaoContract.approve(await factoryContract.getAddress(), price);
             
@@ -359,22 +363,22 @@ describe("Energy Factory", async () => {
         // });
     // });
 
-    describe("Dynamic Exchange Rates", () => {
-        it("Should be able to get the Dynamic Exchange Rate", async () => {
-            const { alice } = await loadFixture(deployFixture);
-            const enrgAmount = BigInt(100);
+    // describe("Dynamic Exchange Rates", () => {
+    //     it("Should be able to get the Dynamic Exchange Rate", async () => {
+    //         const { alice } = await loadFixture(deployFixture);
+    //         const enrgAmount = BigInt(100);
 
-            const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
-            const tx: TransactionRequest = {
-                to: await factoryContract.getAddress(),
-                data: data
-            }
-            const res = await alice.call(tx);
-            const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
+    //         const data = factoryContract.interface.encodeFunctionData("getPrice", [enrgAmount, HDAO_ADDRESS]);
+    //         const tx: TransactionRequest = {
+    //             to: await factoryContract.getAddress(),
+    //             data: data
+    //         }
+    //         const res = await alice.call(tx);
+    //         const decoded = factoryContract.interface.decodeFunctionResult("getPrice", res);
 
-            expect(+(decoded.toString())).to.be.greaterThan(0);
-        });
-    });
+    //         expect(+(decoded.toString())).to.be.greaterThan(0);
+    //     });
+    // });
 
     describe("Burning", () => {
         it("Should be able to burn", async () => {

@@ -10,7 +10,7 @@ describe("Energy Token", async () => {
         await network.provider.request({
             method: "hardhat_reset", 
             params: [{
-                forking: { jsonRpcUrl:'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
+                forking: { jsonRpcUrl:'https://eth-sepolia.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN }
             }]
         });
     });
