@@ -116,7 +116,7 @@ describe("EnergyEscrow", async () => {
     // Add more deployment-related tests here
   });
 
-  describe.only("Deposits", async () => {
+  describe("Deposits", async () => {
     let owner: HardhatEthersSigner,
       taskOwner: HardhatEthersSigner,
       assistant: HardhatEthersSigner,
@@ -136,22 +136,34 @@ describe("EnergyEscrow", async () => {
     });
 
     it("Should allow task owners to deposit ENRG tokens", async () => {
-      const deposit = await energyEscrow.viewDeposit(depositUuid);
-      expect(deposit.depositor).to.equal(taskOwner.address);
-      expect(deposit.amount).to.equal(depositAmount);
-    });
+      const newDepositUuid = generateUUID(await taskOwner.getAddress());
+      const newDepositAmt = BigInt(10000); //100 ENRG tokens
+      await energyToken
+        .connect(taskOwner)
+        .approve(await energyEscrow.getAddress(), depositAmount);
+      await energyEscrow
+        .connect(taskOwner)
+        .deposit(newDepositUuid, depositAmount);
 
-    it("Should allow the contract owner to refund a deposit", async () => {
+      const deposit = await energyEscrow.viewDeposit(newDepositUuid);
+
+      expect(deposit[0]).to.be.equal(await taskOwner.getAddress()); //Depositor address
+      expect(deposit[1]).to.be.equal(newDepositAmt);
+    });
+    it("Should allow the contract owner to refund when the flag is set to true", async () => {
+      await energyEscrow.setAllowRefund(depositUuid, true);
       await energyEscrow.refund(depositUuid);
-
       const deposit = await energyEscrow.viewDeposit(depositUuid);
-      console.log("🚀 ~ file: EnergyEscrow.test.ts:148 ~ it ~ deposit:", deposit)
+      expect(deposit[1]).to.be.equal(0); //Amount
+      expect(deposit[2]).to.be.equal(0); //Claimable
+      expect(deposit[3]).to.be.equal(0); //Refundable
     });
 
-    it("Should allow the contract owner refund and delete a deposit", async () => {
-      const deposit = await energyEscrow.viewDeposit(depositUuid);
-      expect(deposit.depositor).to.equal(taskOwner.address);
-      expect(deposit.amount).to.equal(depositAmount);
+    it("Should disallow the contract owner to refund when the flag is set to false", async () => {
+      await energyEscrow.setAllowRefund(depositUuid, false);
+      await expect(energyEscrow.refund(depositUuid)).revertedWith(
+        "EnergyEscrow::refund: The deposit should be refundable"
+      );
     });
   });
 
@@ -176,7 +188,6 @@ describe("EnergyEscrow", async () => {
       await energyEscrow
         .connect(owner)
         .setAmounts(depositUuid, 0, depositAmount, assistantNumber);
-
     });
     it("Should allow setting refundable, claimable amounts, and assistant count", async () => {
       const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -185,67 +196,173 @@ describe("EnergyEscrow", async () => {
       expect(deposit.assistantCount).to.equal(assistantNumber);
     });
 
-    it("Should allow setting the refund flag", async () => {
+    it.only("Should allow setting the refund flag", async () => {
+      // Set the allow refund flag for the specified deposit
       await energyEscrow.connect(owner).setAllowRefund(depositUuid, false);
+  
+      // Retrieve the updated deposit details
       const deposit = await energyEscrow.viewDeposit(depositUuid);
-      expect(deposit.allowRefund).to.be.false;
+  
+      // Assert that the allowRefund flag in the deposit is set as expected
+      expect(deposit.allowRefund, "Deposit's allowRefund flag should be set to false").to.be.false;
     });
+  
 
-    it("Should allow adding the recipient", async () => {
-      await energyEscrow.addRecipient(
-        depositUuid,
-        assistant.address,
-        recipientUuid
-      );
+    it("Should allow adding a recipient", async () => {
+      // Add the assistant as a recipient to the specified deposit
+      await energyEscrow.addRecipient(depositUuid, assistant.address, recipientUuid);
+  
+      // Retrieve the updated deposit details
       const deposit = await energyEscrow.viewDeposit(depositUuid);
-      expect(deposit[5]).to.be.equal(assistantNumber);
+  
+      // Assert that the number of recipients for the deposit is as expected
+      expect(deposit[5], "Number of recipients in the deposit should match the expected value").to.equal(assistantNumber);
     });
+  
 
     it("Should allow setting the claimable/claimed flag toggle", async () => {
-      await energyEscrow.addRecipient(
-        depositUuid,
-        assistant.address,
-        recipientUuid
-      );
+      // Add the assistant as a recipient to the deposit
+      await energyEscrow.addRecipient(depositUuid, assistant.address, recipientUuid);
+  
+      // Set the deposit as claimable for the assistant
       await energyEscrow.setClaimable(depositUuid, recipientUuid);
-      await energyEscrow.setAmounts(
-        depositUuid,
-        depositAmount,
-        0,
-        assistantNumber
-      );
-
+  
+      // Set the deposit amounts and assistant number
+      await energyEscrow.setAmounts(depositUuid, depositAmount, 0, assistantNumber);
+  
+      // Assistant claims the deposit
       await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
-      const deposit = await energyEscrow.viewDepositRecipient(
-        depositUuid,
-        recipientUuid
-      );
-      expect(deposit[1]).to.be.equal(true);
-      expect(deposit[2]).to.be.equal(true);
-    });
+  
+      // Retrieve deposit details for the recipient
+      const deposit = await energyEscrow.viewDepositRecipient(depositUuid, recipientUuid);
+  
+      // Assert that the recipient's claimable and claimed flags are set to true
+      expect(deposit[1], "Recipient should be marked as claimable").to.be.true;
+      expect(deposit[2], "Recipient should be marked as claimed").to.be.true;
+  });
+  
 
     it("Should allow the assistant to claim the amount", async () => {
-      await energyEscrow.addRecipient(
-        depositUuid,
-        assistant.address,
-        recipientUuid
-      );
+      // Add the assistant as a recipient to the deposit
+      await energyEscrow.addRecipient(depositUuid, assistant.address, recipientUuid);
+  
+      // Set the deposit as claimable for the assistant
       await energyEscrow.setClaimable(depositUuid, recipientUuid);
-      await energyEscrow.setAmounts(
-        depositUuid,
-        depositAmount,
-        0,
-        assistantNumber
-      );
-
+  
+      // Set the deposit amounts and assistant number
+      await energyEscrow.setAmounts(depositUuid, depositAmount, 0, assistantNumber);
+  
+      // Assistant claims the deposit
       await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
-      const deposit = await energyEscrow.viewDepositRecipient(
-        depositUuid,
-        recipientUuid
+  
+      // Retrieve deposit details for the recipient
+      const deposit = await energyEscrow.viewDepositRecipient(depositUuid, recipientUuid);
+  
+      // Assert that the recipient's claimable and claimed flags are true
+      expect(deposit[1], "Recipient should be marked as claimable").to.be.true;
+      expect(deposit[2], "Recipient should be marked as claimed").to.be.true;
+  
+      // Assert that the assistant's balance is equal to the deposit amount
+      expect(await energyToken.balanceOf(assistant.address), "Assistant's balance should equal the deposit amount").to.equal(depositAmount);
+    });
+  
+
+    it("Should allow the contract owner to refund a deposit", async () => {
+      // Trigger the refund operation on the specified deposit
+      await energyEscrow.refund(depositUuid);
+
+      // Retrieve the details of the deposit after refund operation
+      const deposit = await energyEscrow.viewDeposit(depositUuid);
+
+      expect(deposit[0], "Deposited amount should be 0 after refund").to.equal(
+        0
       );
-      expect(deposit[1]).to.be.equal(true);
-      expect(deposit[2]).to.be.equal(true);
-      expect(await energyToken.balanceOf(assistant)).to.be.equal(depositAmount);
+      expect(
+        deposit[1],
+        "Another relevant deposit field should be 0 after refund"
+      ).to.equal(0);
+      expect(
+        deposit[2],
+        "Yet another relevant deposit field should be 0 after refund"
+      ).to.equal(0);
+    });
+
+    it("Should allow the contract owner to delete a deposit", async () => {
+      // Perform the refund operation before attempting to delete the deposit
+      await energyEscrow.connect(taskOwner).refund(depositUuid);
+
+      // Delete the deposit
+      await energyEscrow.deleteDeposit(depositUuid);
+
+      // Retrieve the deleted deposit data
+      const deletedDeposit = await energyEscrow.viewDeposit(depositUuid);
+
+      // Check that the deposit has been properly deleted by confirming the depositor address is the zero address
+      expect(deletedDeposit[0]).to.equal(
+        "0x0000000000000000000000000000000000000000"
+      );
+    });
+
+    it("Should disallow the contract owner to delete a deposit when there's still an amount left", async () => {
+      // Attempt to delete the deposit and expect it to be reverted due to remaining balance
+      await expect(energyEscrow.deleteDeposit(depositUuid)).to.be.revertedWith(
+        "There's still an amount left in the deposit"
+      );
+    });
+
+    describe("Refunds", async () => {
+      it("Should allow the contract owner to refund a deposit without any recipients", async () => {
+        await energyEscrow.refund(depositUuid);
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+
+        expect(deposit[1]).to.be.equal(0); //Amount
+        expect(deposit[2]).to.be.equal(0); //Claimable
+        expect(deposit[3]).to.be.equal(0); //Refundable
+        expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
+      });
+
+      it("Should disallow the contract owner to refund a deposit when there's a recipient already", async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid
+        );
+        await energyEscrow.setAmounts(
+          depositUuid,
+          depositAmount,
+          0,
+          assistantNumber
+        );
+
+        await expect(
+          energyEscrow.connect(taskOwner).refund(depositUuid)
+        ).revertedWith(
+          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+        );
+      });
+
+      it("Should disallow the contract owner to refund when it was accepted previously", async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid
+        );
+        await energyEscrow.setAmounts(
+          depositUuid,
+          depositAmount,
+          0,
+          assistantNumber
+        );
+        await energyEscrow.removeRecipient(depositUuid, recipientUuid);
+
+        await expect(
+          energyEscrow.connect(taskOwner).refund(depositUuid)
+        ).revertedWith(
+          "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant"
+        );
+      });
+
+      //TODO: Implement test case for forced refunds.
     });
   });
 
@@ -309,9 +426,7 @@ describe("EnergyEscrow", async () => {
       expect(deposit.allowRefund).to.be.false;
     });
 
-    it("Should disallow the owner to refund the ENRG if the task was already accepted before", async()=>{
-
-    })
+    it("Should disallow the owner to refund the ENRG if the task was already accepted before", async () => {});
 
     it("Should allow adding multiple recipients", async () => {
       await energyEscrow.addRecipient(
@@ -454,42 +569,82 @@ describe("EnergyEscrow", async () => {
       expect(deposit[3]).to.be.equal(BigInt(0));
     });
 
+    describe("Refunds", async () => {
+      it("Should allow the contract owner to refund a deposit without any recipients", async () => {
+        await energyEscrow.refund(depositUuid);
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+
+        expect(deposit[1]).to.be.equal(0); //Amount
+        expect(deposit[2]).to.be.equal(0); //Claimable
+        expect(deposit[3]).to.be.equal(0); //Refundable
+        expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
+      });
+
+      it("Should disallow the contract owner to refund a deposit when there's a recipient already", async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid
+        );
+        await energyEscrow.setAmounts(
+          depositUuid,
+          depositAmount,
+          0,
+          assistantNumber
+        );
+
+        await expect(
+          energyEscrow.connect(taskOwner).refund(depositUuid)
+        ).revertedWith(
+          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+        );
+      });
+
+      it("Should disallow the contract owner to refund when it was accepted previously", async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid
+        );
+        await energyEscrow.setAmounts(
+          depositUuid,
+          depositAmount,
+          0,
+          assistantNumber
+        );
+        await energyEscrow.removeRecipient(depositUuid, recipientUuid);
+
+        await expect(
+          energyEscrow.connect(taskOwner).refund(depositUuid)
+        ).revertedWith(
+          "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant"
+        );
+      });
+
+      //TODO: Implement test case for forced refunds.
+    });
+
+    describe("Task Edit", async () => {
+      it("Should allow owner to reduce the max assignment", async () => {
+        const deposit = energyEscrow.viewDeposit(depositUuid);
+        const ownerBeforeBalance = await energyToken.balanceOf(taskOwner);
+      });
+
+      it("Should refund the owner upon reducing the max assignment", async () => {});
+
+      it("Should allow the owner to add the max assignment", async () => {});
+
+      it("Should automatically compensate assistants that already claimed their reward when adding the max assignment", async () => {});
+
+      it("Should allow owner to adjust the energy", async () => {});
+
+      it("Should allow owner to adjust the energy", async () => {});
+
+      it("Should allow owner to adjust the energy", async () => {});
+    });
 
     //Task Edit START
-    it("Should allow owner to reduce the max assignment", async()=>{
-      const deposit = energyEscrow.viewDeposit(depositUuid);
-      const ownerBeforeBalance = await energyToken.balanceOf(taskOwner);
-      
-
-
-      
-    })
-    
-    it("Should refund the owner upon reducing the max assignment", async()=>{
-
-    })
-
-    it("Should allow the owner to add the max assignment", async()=>{
-      
-    })
-
-    it("Should automatically compensate assistants that already claimed their reward when adding the max assignment", async()=>{
-      
-    })
-
-    it("Should allow owner to adjust the energy", async()=>{
-      
-    })
-
-    it("Should allow owner to adjust the energy", async()=>{
-      
-    })
-
-    it("Should allow owner to adjust the energy", async()=>{
-      
-    })
 
     //Task Edit END
   });
-
 });
