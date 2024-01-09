@@ -242,13 +242,31 @@ contract EnergyEscrow is Ownable {
                 uniqueDeposit.allowRefund == true) || msg.sender == owner(),
             "EnergyEscrow::refund: conditions for refund not met"
         );
-        uint256 refundable = uniqueDeposit.refundableAmount > 0
-            ? uniqueDeposit.refundableAmount
-            : uniqueDeposit.amount;
-        require(refundable > 0, "EnergyEscrow::refund: nothing to refund");
-        uniqueDeposit.refundableAmount = 0;
-        uniqueDeposit.amount -= refundable;
-        ENRG.transfer(uniqueDeposit.depositor, refundable);
+        require(uniqueDeposit.allowRefund, "EnergyEscrow::refund: The deposit should be refundable");
+
+        //For multiplicity tasks
+        if(uniqueDeposit.assistantCount > 1) {
+            require(uniqueDeposit.recipients.length == 0, "EnergyEscrow::refund: There should be no recipients to be eligible for a refund" );
+
+            uint256 refundable = uniqueDeposit.amount;
+            require(refundable > 0, "EnergyEscrow::refund: nothing to refund");
+            uniqueDeposit.refundableAmount = 0;
+            uniqueDeposit.claimableAmount = 0;
+            uniqueDeposit.amount -= refundable;
+            ENRG.transfer(uniqueDeposit.depositor, refundable);
+        }
+        
+        //For standard tasks
+        else {
+            require(uniqueDeposit.recipients.length == 0, "EnergyEscrow::refund: There should be no recipients to be eligible for a refund");
+            require(uniqueDeposit.refundableAmount > 0, "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant");
+            uint256 refundable = uniqueDeposit.amount;
+            require(refundable > 0, "EnergyEscrow::refund: nothing to refund");
+            uniqueDeposit.refundableAmount = 0;
+            uniqueDeposit.amount -= refundable;
+            ENRG.transfer(uniqueDeposit.depositor, refundable);
+        }
+
     }
 
     /**
