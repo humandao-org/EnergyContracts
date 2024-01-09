@@ -132,8 +132,7 @@ describe("EnergyEscrow", async () => {
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
-      const depositTx = await energyEscrow.connect(taskOwner).deposit(depositUuid, depositAmount);
-      const depositReceipt = await depositTx.wait()
+      await energyEscrow.connect(taskOwner).deposit(depositUuid, depositAmount);
     });
 
     it("Should allow task owners to deposit ENRG tokens", async () => {
@@ -142,10 +141,9 @@ describe("EnergyEscrow", async () => {
       expect(deposit.amount).to.equal(depositAmount);
     });
 
-    it.only("Should allow the contract owner to refund a deposit", async () => {
-      const refundTx = await energyEscrow.refund(depositUuid);
-      const refundReceipt = await refundTx.wait();
-      console.log("GAS USED", refundReceipt?.gasUsed);
+    it("Should allow the contract owner to refund a deposit", async () => {
+      await energyEscrow.refund(depositUuid);
+
       const deposit = await energyEscrow.viewDeposit(depositUuid);
       console.log("🚀 ~ file: EnergyEscrow.test.ts:148 ~ it ~ deposit:", deposit)
     });
@@ -178,6 +176,7 @@ describe("EnergyEscrow", async () => {
       await energyEscrow
         .connect(owner)
         .setAmounts(depositUuid, 0, depositAmount, assistantNumber);
+
     });
     it("Should allow setting refundable, claimable amounts, and assistant count", async () => {
       const deposit = await energyEscrow.viewDeposit(depositUuid);
