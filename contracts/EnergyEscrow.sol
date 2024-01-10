@@ -52,6 +52,9 @@ contract EnergyEscrow is Ownable {
         // We allow refunds by default
         uniqueDeposit.allowRefund = true;
 
+        // By default, we set the isOpenEnded flag to false
+        uniqueDeposit.isOpenEnded = false;
+
         if (uniqueDeposit.depositor == address(0)) {
             uniqueDeposit.depositor = msg.sender;
         }
@@ -81,24 +84,26 @@ contract EnergyEscrow is Ownable {
         Deposit storage uniqueDeposit = deposits[uuid];
 
         if (!uniqueDeposit.isOpenEnded) {
-            if (assistantCount == 1) {
-                require(
-                    uniqueDeposit.amount >= claimableAmount + refundableAmount,
-                    "EnergyEscrow::setAmounts: total amount is not equal to the remaining balance"
-                );
-            }
-
-            if (uniqueDeposit.assistantCount > assistantCount) {
-                // Refund depositor if assistant count is reduced
-                _handleRefundOnAssistantCountReduction(uniqueDeposit, assistantCount);
-            } else if (uniqueDeposit.assistantCount == assistantCount) {
-                // Handle compensation adjustment if assistant count remains the same
-                _handleCompensationAdjustment(uniqueDeposit,claimableAmount);
+            if(uniqueDeposit.assistantCount == 0 && assistantCount > 0) {
+                if (assistantCount == 1) {
+                    require(
+                        uniqueDeposit.amount >= claimableAmount + refundableAmount,
+                        "EnergyEscrow::setAmounts: total amount is not equal to the remaining balance"
+                    );
+                }
+            } else {
+                //If there's already changes
+                if (uniqueDeposit.assistantCount > assistantCount) {
+                    // Refund depositor if assistant count is reduced
+                    _handleRefundOnAssistantCountReduction(uniqueDeposit, assistantCount);
+                } else if (uniqueDeposit.assistantCount == assistantCount) {
+                    // Handle compensation adjustment if assistant count remains the same
+                    _handleCompensationAdjustment(uniqueDeposit,claimableAmount);
+                }
             }
 
             uniqueDeposit.assistantCount = assistantCount;
         }
-
         uniqueDeposit.claimableAmount = claimableAmount;
         uniqueDeposit.refundableAmount = refundableAmount;
     }
@@ -145,6 +150,7 @@ contract EnergyEscrow is Ownable {
             uuid: recipientUuid
         });
         uniqueDeposit.recipients.push(newRecipient);
+        recipientIndex[uuid][recipientUuid] = uniqueDeposit.recipients.length - 1;
     }
 
     /**
@@ -172,7 +178,6 @@ contract EnergyEscrow is Ownable {
             "EnergyEscrow::claim: no recipients"
         );
         uint256 individualClaimAmount = uniqueDeposit.claimableAmount;
-        bool isClaimed = false;
         uint256 index = recipientIndex[uuid][recipientUuid];
         require(index < uniqueDeposit.recipients.length, "EnergyEscrow::removeRecipient: recipient not found");
 
@@ -189,7 +194,6 @@ contract EnergyEscrow is Ownable {
 
         recipient.claimed = true;
         ENRG.transfer(msg.sender, individualClaimAmount);
-        
     }
 
     /**

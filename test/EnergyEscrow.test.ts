@@ -182,7 +182,7 @@ describe("EnergyEscrow", async () => {
       defaultAbiCoder.encode(["address", "string"], [address, formattedUuid])
     );
   }
-  describe.only("Deployment", async () => {
+  describe("Deployment", async () => {
     it("Should set the right owner", async () => {
       const { owner } = await loadFixture(deployFixture);
       expect(await energyEscrow.owner()).to.equal(owner.address);
@@ -248,20 +248,22 @@ describe("EnergyEscrow", async () => {
   //   });
   // });
 
-  describe.only("Standard Tasks", async () => {
+  describe("Standard Tasks", async () => {
     let owner: HardhatEthersSigner,
       taskOwner: HardhatEthersSigner,
       assistant: HardhatEthersSigner,
+      assistant2: HardhatEthersSigner,
       depositUuid: string,
       depositAmount: any;
-    let recipientUuid: string;
+    let recipientUuid: string, recipientUuid2:string
     const assistantNumber = 1;
     // Common setup for the deposit tests
     beforeEach(async () => {
-      ({ owner, taskOwner, assistant } = await loadFixture(deployFixture));
+      ({ owner, taskOwner, assistant, assistant2 } = await loadFixture(deployFixture));
       depositAmount = BigInt(100000); // 1000 ENRG tokens
       depositUuid = generateUUID(await taskOwner.getAddress());
       recipientUuid = generateUUID(assistant.address);
+      recipientUuid2 = generateUUID(assistant2.address);
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
@@ -272,9 +274,10 @@ describe("EnergyEscrow", async () => {
     });
     it("Should allow setting refundable, claimable amounts, and assistant count", async () => {
       const deposit = await energyEscrow.viewDeposit(depositUuid);
+
       expect(deposit.claimableAmount).to.equal(0);
       expect(deposit.refundableAmount).to.equal(depositAmount);
-      expect(deposit.assistantCount).to.equal(assistantNumber);
+      expect(deposit.assistantCount).to.equal(BigInt(assistantNumber));
     });
 
     it("Should allow setting the refund flag", async () => {
@@ -344,12 +347,14 @@ describe("EnergyEscrow", async () => {
       });
 
       it("Should disallow adding a recipient when there's already a recipient", async () => {
+        await expect(energyEscrow.addRecipient(depositUuid, assistant.address, recipientUuid))
+
         // Add the assistant as a recipient to the specified deposit
         await expect(
           energyEscrow.addRecipient(
             depositUuid,
-            assistant.address,
-            recipientUuid
+            assistant2.address,
+            recipientUuid2
           )
         ).to.be.revertedWith(
           "EnergyEscrow::addRecipient: Recipients cannot exceed the assistant count"
@@ -529,7 +534,7 @@ describe("EnergyEscrow", async () => {
     });
   });
 
-  describe.only("Multiplicity Tasks", async () => {
+  describe("Multiplicity Tasks", async () => {
     let owner: HardhatEthersSigner,
       taskOwner: HardhatEthersSigner,
       assistant: HardhatEthersSigner,
@@ -742,7 +747,7 @@ describe("EnergyEscrow", async () => {
       });
     });
 
-    describe("Claiming", async () => {
+    describe.only("Claiming", async () => {
       it("Should allow one assistant to claim the amount", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
@@ -788,12 +793,6 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.setClaimable(depositUuid, recipientUuid2);
         await energyEscrow.setClaimable(depositUuid, recipientUuid3);
         await energyEscrow.setClaimable(depositUuid, recipientUuid4);
-
-        // Simulate assistant claiming
-        console.log(assistant.address, recipientUuid1)
-        console.log(assistant2.address, recipientUuid2)
-        console.log(assistant3.address, recipientUuid3)
-        console.log(assistant4.address, recipientUuid4)
 
         await energyEscrow
           .connect(assistant)
