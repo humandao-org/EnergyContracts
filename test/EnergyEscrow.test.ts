@@ -198,56 +198,6 @@ describe("EnergyEscrow", async () => {
     // Add more deployment-related tests here
   });
 
-  // describe("Deposits", async () => {
-  //   let owner: HardhatEthersSigner,
-  //     taskOwner: HardhatEthersSigner,
-  //     assistant: HardhatEthersSigner,
-  //     depositUuid: string,
-  //     depositAmount: any;
-
-  //   beforeEach(async () => {
-  //     ({ owner, taskOwner, assistant } = await loadFixture(deployFixture));
-  //     depositAmount = BigInt(100000); // 1000 ENRG tokens
-  //     depositUuid = generateUUID(await taskOwner.getAddress());
-
-  //     await energyToken
-  //       .connect(taskOwner)
-  //       .approve(await energyEscrow.getAddress(), depositAmount);
-  //     await energyEscrow.connect(taskOwner).deposit(depositUuid, depositAmount);
-  //   });
-
-  //   it("Should allow task owners to deposit ENRG tokens", async () => {
-  //     const newDepositUuid = generateUUID(await taskOwner.getAddress());
-  //     const newDepositAmt = BigInt(10000); //100 ENRG tokens
-  //     await energyToken
-  //       .connect(taskOwner)
-  //       .approve(await energyEscrow.getAddress(), depositAmount);
-  //     await energyEscrow
-  //       .connect(taskOwner)
-  //       .deposit(newDepositUuid, depositAmount);
-
-  //     const deposit = await energyEscrow.viewDeposit(newDepositUuid);
-
-  //     expect(deposit[0]).to.be.equal(await taskOwner.getAddress()); //Depositor address
-  //     expect(deposit[1]).to.be.equal(newDepositAmt);
-  //   });
-  //   it("Should allow the contract owner to refund when the flag is set to true", async () => {
-  //     await energyEscrow.setAllowRefund(depositUuid, true);
-  //     await energyEscrow.refund(depositUuid);
-  //     const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     expect(deposit[1]).to.be.equal(0); //Amount
-  //     expect(deposit[2]).to.be.equal(0); //Claimable
-  //     expect(deposit[3]).to.be.equal(0); //Refundable
-  //   });
-
-  //   it("Should disallow the contract owner to refund when the flag is set to false", async () => {
-  //     await energyEscrow.setAllowRefund(depositUuid, false);
-  //     await expect(energyEscrow.refund(depositUuid)).revertedWith(
-  //       "EnergyEscrow::refund: The deposit should be refundable"
-  //     );
-  //   });
-  // });
-
   describe("Standard Tasks", async () => {
     let owner: HardhatEthersSigner,
       taskOwner: HardhatEthersSigner,
