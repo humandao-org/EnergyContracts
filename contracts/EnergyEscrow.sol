@@ -196,10 +196,10 @@ contract EnergyEscrow is Ownable {
         //Standard
         if (uniqueDeposit.assistantCount == 1) {
             uniqueDeposit.amount += amount;
-            if(uniqueDeposit.refundableAmount == 0) {
+            if (uniqueDeposit.refundableAmount == 0) {
                 uniqueDeposit.claimableAmount = uniqueDeposit.amount;
             }
-            if(uniqueDeposit.claimableAmount == 0) {
+            if (uniqueDeposit.claimableAmount == 0) {
                 uniqueDeposit.refundableAmount = uniqueDeposit.amount;
             }
         }
@@ -251,7 +251,7 @@ contract EnergyEscrow is Ownable {
         //Calculate the required amount.
         uint256 requiredAmount = uniqueDeposit.claimableAmount *
             (assistantCount - uniqueDeposit.assistantCount);
-        
+
         require(
             amount == requiredAmount,
             "EnergyEscrow::increaseAssistantCount: amount being deposited isn't right"
@@ -298,6 +298,7 @@ contract EnergyEscrow is Ownable {
         Deposit storage uniqueDeposit = deposits[uuid];
         uniqueDeposit.allowRefund = allow;
     }
+
     /**
      * Adds a new recipient to a specific deposit.
      * This function is used to associate an assistant (recipient) with a particular task represented by a deposit.
@@ -651,7 +652,9 @@ contract EnergyEscrow is Ownable {
      *
      * @param uuid deposit uuid
      */
-    function isDepositCompleted(bytes32 uuid) external view returns (bool completed) {
+    function isDepositCompleted(
+        bytes32 uuid
+    ) external view returns (bool completed) {
         Deposit storage uniqueDeposit = deposits[uuid];
         if (uniqueDeposit.recipients.length < 1) {
             return false;
@@ -682,23 +685,30 @@ contract EnergyEscrow is Ownable {
     /**
      * To check how many claims remains and how many recipients should be added to maximize the amount;
      * @param uuid deposit uuid
-     * @return claimsRemaining 
-     * @return acceptancesRemaining 
+     * @return claimsRemaining
+     * @return acceptancesRemaining
      */
-    function calculateRemainingClaims(bytes32 uuid) external view returns (uint256 claimsRemaining, uint256 acceptancesRemaining) {
+    function calculateRemainingClaims(
+        bytes32 uuid
+    )
+        external
+        view
+        returns (uint256 claimsRemaining, uint256 acceptancesRemaining)
+    {
         Deposit storage uniqueDeposit = deposits[uuid];
         uint256 unclaimedCount = 0;
 
         for (uint256 i = 0; i < uniqueDeposit.recipients.length; i++) {
-                if (!uniqueDeposit.recipients[i].claimed) {
-                    unclaimedCount++;
-                }
+            if (!uniqueDeposit.recipients[i].claimed) {
+                unclaimedCount++;
+            }
         }
 
-        uint256 recipientsNeeded = (uniqueDeposit.amount - (uniqueDeposit.claimableAmount * unclaimedCount)) / uniqueDeposit.claimableAmount;
-        
+        uint256 recipientsNeeded = (uniqueDeposit.amount -
+            (uniqueDeposit.claimableAmount * unclaimedCount)) /
+            uniqueDeposit.claimableAmount;
 
-        return (unclaimedCount+recipientsNeeded, recipientsNeeded);
+        return (unclaimedCount + recipientsNeeded, recipientsNeeded);
     }
 
     function _ownerRefund(Deposit storage uniqueDeposit) private {
