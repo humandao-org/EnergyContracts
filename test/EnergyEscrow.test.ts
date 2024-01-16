@@ -255,11 +255,13 @@ describe("EnergyEscrow", async () => {
       assistant2: HardhatEthersSigner,
       depositUuid: string,
       depositAmount: any;
-    let recipientUuid: string, recipientUuid2:string
+    let recipientUuid: string, recipientUuid2: string;
     const assistantNumber = 1;
     // Common setup for the deposit tests
     beforeEach(async () => {
-      ({ owner, taskOwner, assistant, assistant2 } = await loadFixture(deployFixture));
+      ({ owner, taskOwner, assistant, assistant2 } = await loadFixture(
+        deployFixture
+      ));
       depositAmount = BigInt(100000); // 1000 ENRG tokens
       depositUuid = generateUUID(await taskOwner.getAddress());
       recipientUuid = generateUUID(assistant.address);
@@ -267,10 +269,9 @@ describe("EnergyEscrow", async () => {
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
-      await energyEscrow.connect(taskOwner).deposit(depositUuid, depositAmount);
       await energyEscrow
-        .connect(owner)
-        .setAmounts(depositUuid, 0, depositAmount, assistantNumber);
+        .connect(taskOwner)
+        .createDeposit(depositUuid, depositAmount, assistantNumber);
     });
     it("Should allow setting refundable, claimable amounts, and assistant count", async () => {
       const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -305,14 +306,6 @@ describe("EnergyEscrow", async () => {
       // Set the deposit as claimable for the assistant
       await energyEscrow.setClaimable(depositUuid, recipientUuid);
 
-      // Set the deposit amounts and assistant number
-      await energyEscrow.setAmounts(
-        depositUuid,
-        depositAmount,
-        0,
-        assistantNumber
-      );
-
       // Assistant claims the deposit
       await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
 
@@ -338,7 +331,6 @@ describe("EnergyEscrow", async () => {
 
         // Retrieve the updated deposit details
         const deposit = await energyEscrow.viewDeposit(depositUuid);
-
         // Assert that the number of recipients for the deposit is as expected
         expect(
           deposit[5],
@@ -347,7 +339,13 @@ describe("EnergyEscrow", async () => {
       });
 
       it("Should disallow adding a recipient when there's already a recipient", async () => {
-        await expect(energyEscrow.addRecipient(depositUuid, assistant.address, recipientUuid))
+        await expect(
+          energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid
+          )
+        );
 
         // Add the assistant as a recipient to the specified deposit
         await expect(
@@ -373,14 +371,7 @@ describe("EnergyEscrow", async () => {
 
         // Set the deposit as claimable for the assistant
         await energyEscrow.setClaimable(depositUuid, recipientUuid);
-
         // Set the deposit amounts and assistant number
-        await energyEscrow.setAmounts(
-          depositUuid,
-          depositAmount,
-          0,
-          assistantNumber
-        );
 
         // Assistant claims the deposit
         await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
@@ -413,14 +404,6 @@ describe("EnergyEscrow", async () => {
 
         // Set the deposit as claimable for the assistant
         await energyEscrow.setClaimable(depositUuid, recipientUuid);
-
-        // Set the deposit amounts and assistant number
-        await energyEscrow.setAmounts(
-          depositUuid,
-          depositAmount,
-          0,
-          assistantNumber
-        );
 
         // Assistant claims the deposit
         await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
@@ -495,12 +478,6 @@ describe("EnergyEscrow", async () => {
           assistant.address,
           recipientUuid
         );
-        await energyEscrow.setAmounts(
-          depositUuid,
-          depositAmount,
-          0,
-          assistantNumber
-        );
 
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
@@ -515,12 +492,6 @@ describe("EnergyEscrow", async () => {
           assistant.address,
           recipientUuid
         );
-        await energyEscrow.setAmounts(
-          depositUuid,
-          depositAmount,
-          0,
-          assistantNumber
-        );
         await energyEscrow.removeRecipient(depositUuid, recipientUuid);
 
         await expect(
@@ -530,7 +501,146 @@ describe("EnergyEscrow", async () => {
         );
       });
 
-      //TODO: Implement test case for forced refunds.
+      describe("Force refunds", async () => {
+        it("Should allow the contract owner/admins to force refunds compensating the assistant", async () => {
+          const assistantBalanceBefore = await energyToken.balanceOf(
+            assistant.address
+          );
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid
+          );
+          const depositBefore = await energyEscrow.viewDeposit(depositUuid);
+          await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid,
+            assistant.address
+          );
+          const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+          expect(await energyToken.balanceOf(assistant)).to.equal(
+            assistantBalanceBefore + depositAmount
+          );
+          expect(depositAfter.amount).to.equal(0);
+          expect(depositAfter.claimableAmount).to.equal(0);
+          expect(depositAfter.refundableAmount).to.equal(0);
+        });
+
+        it("Should allow the contract owner/admins to force refunds refunding the task owner", async () => {
+          const ownerBalanceBefore = await energyToken.balanceOf(
+            taskOwner.address
+          );
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid
+          );
+          const deposit = await energyEscrow.viewDeposit(depositUuid);
+          const forceRefundTx = await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid,
+            taskOwner.address
+          );
+          const forceRefundReceipt = await forceRefundTx.wait();
+
+          expect(await energyToken.balanceOf(owner.address)).to.equal(
+            ownerBalanceBefore
+          );
+        });
+
+        it("Should allow the contract owner/admins to force refunds refunding the task owner (Task is already set to claimable)", async () => {
+          const ownerBalanceBefore = await energyToken.balanceOf(
+            taskOwner.address
+          );
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid
+          );
+          const deposit = await energyEscrow.viewDeposit(depositUuid);
+          await energyEscrow.setClaimable(depositUuid, recipientUuid);
+          await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid,
+            taskOwner.address
+          );
+
+          expect(await energyToken.balanceOf(owner.address)).to.equal(
+            ownerBalanceBefore
+          );
+        });
+      });
+    });
+
+    describe("Task Edit", async () => {
+      it("Should be able to increase the ENRG amount in the deposit", async () => {
+        const additionalEnrgIncrease = BigInt(10);
+        const scaledAdditionalEnrgIncrease =
+          additionalEnrgIncrease *
+          BigInt(10) ** BigInt(await energyToken.decimals());
+        await energyToken.mint(taskOwner.address, scaledAdditionalEnrgIncrease);
+        //Check before deposit amount
+        const viewDepositBef = await energyEscrow.viewDeposit(depositUuid);
+        expect(viewDepositBef.amount, "Energy reward before addition").to.equal(
+          depositAmount
+        );
+
+        //Owner deposits additional amount
+        await energyToken
+          .connect(taskOwner)
+          .approve(
+            await energyEscrow.getAddress(),
+            scaledAdditionalEnrgIncrease
+          );
+        
+        await energyEscrow
+          .connect(taskOwner)
+          .increaseEnergyAmount(depositUuid, scaledAdditionalEnrgIncrease);
+
+        const viewDepositAft = await energyEscrow.viewDeposit(depositUuid);
+        expect(viewDepositAft.amount, "Energy reward after addition").to.equal(
+          scaledAdditionalEnrgIncrease + viewDepositBef.amount
+        );
+      });
+
+      it("Should be able for the assistant to claim the boosted amount", async () => {
+        const additionalEnrgIncrease = BigInt(10);
+        const scaledAdditionalEnrgIncrease =
+          additionalEnrgIncrease *
+          BigInt(10) ** BigInt(await energyToken.decimals());
+        await energyToken.mint(taskOwner.address, scaledAdditionalEnrgIncrease);
+        //Check before deposit amount
+        const viewDepositBef = await energyEscrow.viewDeposit(depositUuid);
+
+        //Owner deposits additional amount
+        await energyToken
+          .connect(taskOwner)
+          .approve(
+            await energyEscrow.getAddress(),
+            scaledAdditionalEnrgIncrease
+          );
+        await energyEscrow
+          .connect(taskOwner)
+          .increaseEnergyAmount(depositUuid, scaledAdditionalEnrgIncrease);
+
+        //Contract owner increases the ENRG amount;
+        const viewDepositAft = await energyEscrow.viewDeposit(depositUuid);
+        expect(viewDepositAft.amount, "Energy reward after addition").to.equal(
+          scaledAdditionalEnrgIncrease + viewDepositBef.amount
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid
+        );
+        await energyEscrow.setClaimable(depositUuid, recipientUuid);
+        await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
+
+        expect(
+          await energyToken.balanceOf(assistant.address),
+          "Assistant should be able to claim the original reward plus the increase"
+        ).to.equal(scaledAdditionalEnrgIncrease + viewDepositBef.amount);
+      });
     });
   });
 
@@ -540,7 +650,7 @@ describe("EnergyEscrow", async () => {
       assistant: HardhatEthersSigner,
       assistant2: HardhatEthersSigner,
       depositUuid: string,
-      depositAmount: any,
+      depositAmount: bigint,
       assistant3: HardhatEthersSigner,
       assistant4: HardhatEthersSigner,
       assistant5: HardhatEthersSigner;
@@ -575,10 +685,7 @@ describe("EnergyEscrow", async () => {
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
-      await energyEscrow.connect(taskOwner).deposit(depositUuid, depositAmount);
-      await energyEscrow
-        .connect(owner)
-        .setAmounts(depositUuid, enrgPerTask, depositAmount, assistantNumber);
+      await energyEscrow.connect(taskOwner).createDeposit(depositUuid, depositAmount, assistantNumber);
     });
 
     it("Should allow setting refundable, claimable amounts, and assistant count", async () => {
@@ -704,10 +811,6 @@ describe("EnergyEscrow", async () => {
           recipientUuid4
         );
         const removeRecipientReciept = await removeRecipientTx.wait();
-        console.log(
-          "🚀 ~ file: EnergyEscrow.test.ts:483 ~ it ~ removeRecipientReciept:",
-          removeRecipientReciept?.gasUsed
-        );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
         expect(deposit[5]).to.be.equal(assistantNumber - 1);
@@ -747,7 +850,474 @@ describe("EnergyEscrow", async () => {
       });
     });
 
-    describe.only("Claiming", async () => {
+    it("Should allow one assistant to claim the amount", async () => {
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant.address,
+        recipientUuid1
+      );
+      await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+      const depositBef = await energyEscrow.viewDeposit(depositUuid);
+      await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
+      const depositAft = await energyEscrow.viewDeposit(depositUuid);
+      expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
+      expect(depositAft[1]).to.be.equal(depositBef[1] - enrgPerTask);
+      expect(depositAft[1]).to.be.equal(depositAft[3]);
+    });
+
+    it("Should allow all assistants to claim the amount", async () => {
+      //Adding recipients
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant.address,
+        recipientUuid1
+      );
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant2.address,
+        recipientUuid2
+      );
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant3.address,
+        recipientUuid3
+      );
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant4.address,
+        recipientUuid4
+      );
+
+      //Setting the recipient entry to claimable state
+      await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+      await energyEscrow.setClaimable(depositUuid, recipientUuid2);
+      await energyEscrow.setClaimable(depositUuid, recipientUuid3);
+      await energyEscrow.setClaimable(depositUuid, recipientUuid4);
+
+      await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
+      await energyEscrow.connect(assistant2).claim(depositUuid, recipientUuid2);
+      await energyEscrow.connect(assistant3).claim(depositUuid, recipientUuid3);
+      await energyEscrow.connect(assistant4).claim(depositUuid, recipientUuid4);
+
+      //Checking assistant balance
+      expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
+      expect(await energyToken.balanceOf(assistant2)).to.be.equal(enrgPerTask);
+      expect(await energyToken.balanceOf(assistant3)).to.be.equal(enrgPerTask);
+      expect(await energyToken.balanceOf(assistant4)).to.be.equal(enrgPerTask);
+
+      //Check contract deposit
+      const deposit = await energyEscrow.viewDeposit(depositUuid);
+      expect(deposit[1]).to.be.equal(BigInt(0));
+      expect(deposit[3]).to.be.equal(BigInt(0));
+    });
+
+
+    describe("Deposit Deletion", async () => {
+      it("Should allow the contract owner to delete a deposit", async () => {
+        // Perform the refund operation before attempting to delete the deposit
+        await energyEscrow.connect(taskOwner).refund(depositUuid);
+  
+        // Delete the deposit
+        await energyEscrow.deleteDeposit(depositUuid);
+  
+        // Retrieve the deleted deposit data
+        const deletedDeposit = await energyEscrow.viewDeposit(depositUuid);
+  
+        // Check that the deposit has been properly deleted by confirming the depositor address is the zero address
+        expect(deletedDeposit[0]).to.equal(
+          "0x0000000000000000000000000000000000000000"
+        );
+      });
+  
+      it("Should disallow the contract owner to delete a deposit when there's still an amount left", async () => {
+        // Attempt to delete the deposit and expect it to be reverted due to remaining balance
+        await expect(energyEscrow.deleteDeposit(depositUuid)).to.be.revertedWith(
+          "There's still an amount left in the deposit"
+        );
+      });
+    });
+  
+    describe("Refunds", async () => {
+      it("Should allow the contract owner to refund a deposit without any recipients", async () => {
+        await energyEscrow.refund(depositUuid);
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+  
+        expect(deposit[1]).to.be.equal(0); //Amount
+        expect(deposit[2]).to.be.equal(0); //Claimable
+        expect(deposit[3]).to.be.equal(0); //Refundable
+        expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
+      });
+  
+      it("Should disallow the owner to refund a deposit when there's a recipient already", async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid1
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant2.address,
+          recipientUuid2
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant3.address,
+          recipientUuid3
+        );
+  
+        await expect(
+          energyEscrow.connect(taskOwner).refund(depositUuid)
+        ).revertedWith(
+          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+        );
+      });
+      describe("Force refunds", async () => {
+        it("Should allow the contract owner/admins to force refunds compensating the assistant", async () => {
+          const assistantBalanceBefore = await energyToken.balanceOf(
+            assistant.address
+          );
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid1
+          );
+          const depositBefore = await energyEscrow.viewDeposit(depositUuid);
+          await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid1,
+            assistant.address
+          );
+          const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+          expect(await energyToken.balanceOf(assistant)).to.equal(
+            assistantBalanceBefore + enrgPerTask
+          );
+          expect(
+            depositAfter.amount,
+            "Deposit amount should just be deducted by the claimable amount"
+          ).to.equal(depositBefore.amount - depositAfter.claimableAmount);
+          expect(
+            depositAfter.claimableAmount,
+            "Claimable amount should be the same"
+          ).to.equal(depositBefore.claimableAmount); //The same
+          expect(
+            depositAfter.refundableAmount,
+            "Refundable amount should be equal to the deposit amount"
+          ).to.equal(depositBefore.amount - depositAfter.claimableAmount);
+        });
+        it("Should allow the contract owner/admins to force refunds refunding the task owner", async () => {
+          const ownerBalanceBefore =
+            (await energyToken.balanceOf(taskOwner.address)) + depositAmount;
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid1
+          );
+          await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid1,
+            taskOwner.address
+          );
+          const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+          const ownerBalanceAfter = await energyToken.balanceOf(
+            taskOwner.address
+          );
+          expect(ownerBalanceAfter).to.equal(ownerBalanceBefore);
+          expect(
+            depositAfter.amount,
+            "Deposit amount should be equal to 0"
+          ).to.equal(0);
+          expect(
+            depositAfter.claimableAmount,
+            "Claimable amount should be equal to 0"
+          ).to.equal(0); //The same
+          expect(
+            depositAfter.refundableAmount,
+            "Refundable amount should be equal to 0"
+          ).to.equal(0);
+        });
+  
+        it("Should allow the contract owner/admins to force refunds refunding the task owner (Task is already set to claimable)", async () => {
+          const ownerBalanceBefore =
+            (await energyToken.balanceOf(taskOwner.address)) + depositAmount;
+
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistant.address,
+            recipientUuid1
+          );
+          const deposit = await energyEscrow.viewDeposit(depositUuid);
+          await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+          await energyEscrow.forceRefund(
+            depositUuid,
+            recipientUuid1,
+            taskOwner.address
+          );
+          expect(await energyToken.balanceOf(taskOwner.address)).to.equal(
+            ownerBalanceBefore - enrgPerTask
+          );
+          expect(await energyToken.balanceOf(assistant)).to.equal(enrgPerTask);
+        });
+      });
+    });
+  
+    describe("Task Edit", async () => {
+      beforeEach(async () => {
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid1
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant2.address,
+          recipientUuid2
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant3.address,
+          recipientUuid3
+        );
+      });
+  
+      it("Should allow task owner to increase the max assignment and make a deposit", async () => {
+        const newAssistantCount = 6;
+        const amountToDeposit =
+          (BigInt(newAssistantCount) - BigInt(assistantNumber)) *
+          BigInt(enrgPerTask);
+        const depositBefore = await energyEscrow.viewDeposit(depositUuid);
+        const ownerBeforeBalance =
+          (await energyToken.balanceOf(taskOwner)) + depositAmount;
+  
+        await energyToken
+          .connect(taskOwner)
+          .approve(await energyEscrow.getAddress(), amountToDeposit);
+        await energyEscrow
+          .connect(taskOwner)
+          .increaseAssistantCount(depositUuid, newAssistantCount, amountToDeposit);
+  
+        const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+        expect(await energyToken.balanceOf(taskOwner.address)).to.equal(
+          ownerBeforeBalance - (depositAmount + amountToDeposit)
+        );
+        expect(depositAfter.amount).to.equal(
+          depositBefore.amount + BigInt(amountToDeposit)
+        );
+      });
+  
+      it("Should automatically compensate assistants that already claimed their reward when increasing the ENRG", async () => {
+        const depositBefore = await energyEscrow.viewDeposit(depositUuid);
+        const newEnrgValue = BigInt(6000);
+        const amountToDeposit =
+          depositBefore.assistantCount * newEnrgValue - depositAmount;
+  
+        await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid2);
+  
+        await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
+        await energyEscrow.connect(assistant2).claim(depositUuid, recipientUuid2);
+  
+        await energyToken
+          .connect(taskOwner)
+          .approve(await energyEscrow.getAddress(), amountToDeposit);
+        await energyEscrow
+          .connect(taskOwner)
+          .increaseEnergyAmount(depositUuid, amountToDeposit);
+  
+        const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+  
+        const depositAfterCompensation = await energyEscrow.viewDeposit(
+          depositUuid
+        );
+  
+        expect(await energyToken.balanceOf(assistant.address)).to.equal(
+          newEnrgValue
+        );
+        expect(await energyToken.balanceOf(assistant2.address)).to.equal(
+          newEnrgValue
+        );
+        expect(depositAfterCompensation.amount).to.equal(
+          (BigInt(assistantNumber) - BigInt(2)) * newEnrgValue
+        );
+        expect(depositAfterCompensation.refundableAmount).to.equal(
+          (BigInt(assistantNumber) - BigInt(2)) * newEnrgValue
+        );
+      });
+    });
+  });
+
+  describe.only("Missions", async () => {
+    let owner: HardhatEthersSigner,
+      admin: HardhatEthersSigner,
+      assistant: HardhatEthersSigner,
+      assistant2: HardhatEthersSigner,
+      assistant3: HardhatEthersSigner,
+      assistant4: HardhatEthersSigner,
+      assistant5: HardhatEthersSigner,
+      assistant6: HardhatEthersSigner,
+      assistant7: HardhatEthersSigner,
+      assistant8: HardhatEthersSigner,
+      assistant9: HardhatEthersSigner,
+      assistant10: HardhatEthersSigner,
+      assistant11: HardhatEthersSigner,
+      assistant12: HardhatEthersSigner,
+      assistant13: HardhatEthersSigner,
+      assistant14: HardhatEthersSigner,
+      assistant15: HardhatEthersSigner,
+      assistant16: HardhatEthersSigner,
+      assistant17: HardhatEthersSigner;
+  
+    let recipientUuid1: string,
+      recipientUuid2: string,
+      recipientUuid3: string,
+      recipientUuid4: string,
+      recipientUuid5: string,
+      recipientUuid6: string,
+      recipientUuid7: string,
+      recipientUuid8: string,
+      recipientUuid9: string,
+      recipientUuid10: string,
+      recipientUuid11: string,
+      recipientUuid12: string,
+      recipientUuid13: string,
+      recipientUuid14: string,
+      recipientUuid15: string,
+      recipientUuid16: string,
+      recipientUuid17: string;
+  
+    let depositAmount: bigint;
+    let enrgPerTask: bigint;
+    let depositUuid: string;
+    // Common setup for the deposit tests
+    beforeEach(async () => {
+      ({
+        owner,
+        admin,
+        assistant,
+        assistant2,
+        assistant3,
+        assistant4,
+        assistant5,
+        assistant6,
+        assistant7,
+        assistant8,
+        assistant9,
+        assistant10,
+        assistant11,
+        assistant12,
+        assistant13,
+        assistant14,
+        assistant15,
+        assistant16,
+        assistant17,
+      } = await loadFixture(deployFixtureBulk));
+      enrgPerTask = BigInt(1000);
+      depositAmount = BigInt(100000); // 1000 ENRG tokens
+      depositUuid = generateUUID(await admin.getAddress());
+  
+      recipientUuid1 = generateUUID(assistant.address);
+      recipientUuid2 = generateUUID(assistant2.address);
+      recipientUuid3 = generateUUID(assistant3.address);
+      recipientUuid4 = generateUUID(assistant4.address);
+      recipientUuid5 = generateUUID(assistant5.address);
+      recipientUuid6 = generateUUID(assistant6.address);
+      recipientUuid7 = generateUUID(assistant7.address);
+      recipientUuid8 = generateUUID(assistant8.address);
+      recipientUuid9 = generateUUID(assistant9.address);
+      recipientUuid10 = generateUUID(assistant10.address);
+      recipientUuid11 = generateUUID(assistant11.address);
+      recipientUuid12 = generateUUID(assistant12.address);
+      recipientUuid13 = generateUUID(assistant13.address);
+      recipientUuid14 = generateUUID(assistant14.address);
+      recipientUuid15 = generateUUID(assistant15.address);
+      recipientUuid16 = generateUUID(assistant16.address);
+      recipientUuid17 = generateUUID(assistant17.address);
+  
+      await energyToken
+        .connect(admin)
+        .approve(await energyEscrow.getAddress(), depositAmount);
+      await energyEscrow.connect(admin).createOpenEndedDeposit(depositUuid, depositAmount, enrgPerTask);
+
+    });
+  
+    it("Should allow setting refundable, claimable amounts", async () => {
+      const deposit = await energyEscrow.viewDeposit(depositUuid);
+      expect(deposit.claimableAmount).to.equal(enrgPerTask);
+      expect(deposit.refundableAmount).to.equal(depositAmount);
+    });
+  
+    it("Should allow setting the isOpenEnded flag", async () => {
+      const deposit = await energyEscrow.viewDeposit(depositUuid);
+      expect(deposit.isOpenEnded).to.equal(true);
+    });
+  
+    it("Should allow setting the refund flag", async () => {
+      let deposit;
+      await energyEscrow.connect(owner).setAllowRefund(depositUuid, false);
+      deposit = await energyEscrow.viewDeposit(depositUuid);
+      expect(deposit.allowRefund).to.be.false;
+  
+      await energyEscrow.connect(owner).setAllowRefund(depositUuid, true);
+      deposit = await energyEscrow.viewDeposit(depositUuid);
+      expect(deposit.allowRefund).to.be.true;
+    });
+  
+    it("Should allow setting the claimable/claimed flag toggle", async () => {
+      await energyEscrow.addRecipient(
+        depositUuid,
+        assistant.address,
+        recipientUuid1
+      );
+      await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+  
+      await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
+      const depositRecipient = await energyEscrow.viewDepositRecipient(
+        depositUuid,
+        recipientUuid1
+      );
+      expect(depositRecipient[1]).to.be.equal(true);
+      expect(depositRecipient[2]).to.be.equal(true);
+    });
+  
+    describe("Adding Recipients", async () => {
+      it("Should allow adding multiple recipients", async () => {
+        const recipientsCountToAdd = 6;
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid1
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant2.address,
+          recipientUuid2
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant3.address,
+          recipientUuid3
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant4.address,
+          recipientUuid4
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant5.address,
+          recipientUuid5
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant6.address,
+          recipientUuid6
+        );
+  
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+        expect(deposit.recipientCount).to.be.equal(recipientsCountToAdd);
+      });
+    });
+
+    describe("Claiming", async () => {
       it("Should allow one assistant to claim the amount", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
@@ -756,16 +1326,15 @@ describe("EnergyEscrow", async () => {
         );
         await energyEscrow.setClaimable(depositUuid, recipientUuid1);
         const depositBef = await energyEscrow.viewDeposit(depositUuid);
-        await energyEscrow
-          .connect(assistant)
-          .claim(depositUuid, recipientUuid1);
+        await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
         const depositAft = await energyEscrow.viewDeposit(depositUuid);
         expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
         expect(depositAft[1]).to.be.equal(depositBef[1] - enrgPerTask);
         expect(depositAft[1]).to.be.equal(depositAft[3]);
       });
-
+  
       it("Should allow all assistants to claim the amount", async () => {
+        const assistantCountToAdd = 13;
         //Adding recipients
         await energyEscrow.addRecipient(
           depositUuid,
@@ -787,640 +1356,247 @@ describe("EnergyEscrow", async () => {
           assistant4.address,
           recipientUuid4
         );
-
-        //Setting the recipient entry to claimable state
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant5.address,
+          recipientUuid5
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant6.address,
+          recipientUuid6
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant7.address,
+          recipientUuid7
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant8.address,
+          recipientUuid8
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant9.address,
+          recipientUuid9
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant10.address,
+          recipientUuid10
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant11.address,
+          recipientUuid11
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant12.address,
+          recipientUuid12
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant13.address,
+          recipientUuid13
+        );
+  
+        //Setting the recipients entries to claimable state
         await energyEscrow.setClaimable(depositUuid, recipientUuid1);
         await energyEscrow.setClaimable(depositUuid, recipientUuid2);
         await energyEscrow.setClaimable(depositUuid, recipientUuid3);
         await energyEscrow.setClaimable(depositUuid, recipientUuid4);
-
+        await energyEscrow.setClaimable(depositUuid, recipientUuid5);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid6);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid7);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid8);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid9);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid10);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid11);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid12);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid13);
+  
+        // Simulate assistant claiming
+        await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
+        await energyEscrow.connect(assistant2).claim(depositUuid, recipientUuid2);
+        await energyEscrow.connect(assistant3).claim(depositUuid, recipientUuid3);
+        await energyEscrow.connect(assistant4).claim(depositUuid, recipientUuid4);
+        await energyEscrow.connect(assistant5).claim(depositUuid, recipientUuid5);
+        await energyEscrow.connect(assistant6).claim(depositUuid, recipientUuid6);
+        await energyEscrow.connect(assistant7).claim(depositUuid, recipientUuid7);
+        await energyEscrow.connect(assistant8).claim(depositUuid, recipientUuid8);
+        await energyEscrow.connect(assistant9).claim(depositUuid, recipientUuid9);
         await energyEscrow
-          .connect(assistant)
-          .claim(depositUuid, recipientUuid1);
+          .connect(assistant10)
+          .claim(depositUuid, recipientUuid10);
         await energyEscrow
-          .connect(assistant2)
-          .claim(depositUuid, recipientUuid2);
+          .connect(assistant11)
+          .claim(depositUuid, recipientUuid11);
         await energyEscrow
-          .connect(assistant3)
-          .claim(depositUuid, recipientUuid3);
+          .connect(assistant12)
+          .claim(depositUuid, recipientUuid12);
         await energyEscrow
-          .connect(assistant4)
-          .claim(depositUuid, recipientUuid4);
-
+          .connect(assistant13)
+          .claim(depositUuid, recipientUuid13);
+  
         //Checking assistant balance
         expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
-        expect(await energyToken.balanceOf(assistant2)).to.be.equal(
-          enrgPerTask
-        );
-        expect(await energyToken.balanceOf(assistant3)).to.be.equal(
-          enrgPerTask
-        );
-        expect(await energyToken.balanceOf(assistant4)).to.be.equal(
-          enrgPerTask
-        );
-
+        expect(await energyToken.balanceOf(assistant2)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant3)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant4)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant5)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant6)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant7)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant8)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant9)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant10)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant11)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant12)).to.be.equal(enrgPerTask);
+        expect(await energyToken.balanceOf(assistant13)).to.be.equal(enrgPerTask);
+  
         //Check contract deposit
         const deposit = await energyEscrow.viewDeposit(depositUuid);
-        expect(deposit[1]).to.be.equal(BigInt(0));
-        expect(deposit[3]).to.be.equal(BigInt(0));
+        const amountCost = enrgPerTask * BigInt(assistantCountToAdd);
+        expect(deposit[1]).to.be.equal(depositAmount - amountCost);
+        expect(deposit[3]).to.be.equal(depositAmount - amountCost);
       });
-    });
-
-    describe("Deposit Deletion", async () => {});
-
-    describe("Refunds", async () => {
-      it("Should allow the contract owner to refund a deposit without any recipients", async () => {
-        await energyEscrow.refund(depositUuid);
-        const deposit = await energyEscrow.viewDeposit(depositUuid);
-
-        expect(deposit[1]).to.be.equal(0); //Amount
-        expect(deposit[2]).to.be.equal(0); //Claimable
-        expect(deposit[3]).to.be.equal(0); //Refundable
-        expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
-      });
-
-      it("Should disallow the owner to refund a deposit when there's a recipient already", async () => {
+  
+      it("Should disallow one assistant to claim the amount if it's not yet claimable", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
           recipientUuid1
         );
-        await energyEscrow.addRecipient(
-          depositUuid,
-          assistant2.address,
-          recipientUuid2
-        );
-        await energyEscrow.addRecipient(
-          depositUuid,
-          assistant3.address,
-          recipientUuid3
-        );
-
         await expect(
-          energyEscrow.connect(taskOwner).refund(depositUuid)
-        ).revertedWith(
-          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+          energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1)
+        ).to.be.revertedWith(
+          "EnergyEscrow::claim: The recipient deposit state is not yet claimable"
         );
       });
-
-      // it("Should disallow the contract owner to refund when it was accepted previously", async () => {
-      //   await energyEscrow.addRecipient(
-      //     depositUuid,
-      //     assistant.address,
-      //     recipientUuid
-      //   );
-      //   await energyEscrow.setAmounts(
-      //     depositUuid,
-      //     depositAmount,
-      //     0,
-      //     assistantNumber
-      //   );
-      //   await energyEscrow.removeRecipient(depositUuid, recipientUuid);
-
-      //   await expect(
-      //     energyEscrow.connect(taskOwner).refund(depositUuid)
-      //   ).revertedWith(
-      //     "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant"
-      //   );
-      // });
-
+    });
+  
+    describe("Deposit Deletion", async () => {
+      it("Should allow the contract owner to delete a deposit", async () => {
+        // Perform the refund operation before attempting to delete the deposit
+        await energyEscrow.connect(admin).refund(depositUuid);
+  
+        // Delete the deposit
+        await energyEscrow.deleteDeposit(depositUuid);
+  
+        // Retrieve the deleted deposit data
+        const deletedDeposit = await energyEscrow.viewDeposit(depositUuid);
+  
+        // Check that the deposit has been properly deleted by confirming the depositor address is the zero address
+        expect(deletedDeposit[0]).to.equal(
+          "0x0000000000000000000000000000000000000000"
+        );
+      });
+  
+      it("Should disallow the contract owner to delete a deposit when there's still an amount left", async () => {
+        // Attempt to delete the deposit and expect it to be reverted due to remaining balance
+        await expect(energyEscrow.deleteDeposit(depositUuid)).to.be.revertedWith(
+          "There's still an amount left in the deposit"
+        );
+      });
+    });
+  
+    describe("Refunds", async () => {
+      it("Should allow the contract owner to refund a deposit without any recipients", async () => {
+        await energyEscrow.refund(depositUuid);
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+  
+        expect(deposit[1]).to.be.equal(0); //Amount
+        expect(deposit[2]).to.be.equal(0); //Claimable
+        expect(deposit[3]).to.be.equal(0); //Refundable
+        expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
+      });
+  
       //TODO: Implement test case for forced refunds.
     });
-
+  
     describe("Task Edit", async () => {
-      it("Should allow owner to reduce the max assignment", async () => {
-        const deposit = energyEscrow.viewDeposit(depositUuid);
-        const ownerBeforeBalance = await energyToken.balanceOf(taskOwner);
+      const claimedAssistantsCount = 7;
+      const newEnrgValue = BigInt(2000);
+  
+      beforeEach(async () => {
+        const assistants = [
+          assistant,
+          assistant2,
+          assistant3,
+          assistant4,
+          assistant5,
+          assistant6,
+          assistant7,
+        ];
+        const recipientUuids = [
+          recipientUuid1,
+          recipientUuid2,
+          recipientUuid3,
+          recipientUuid4,
+          recipientUuid5,
+          recipientUuid6,
+          recipientUuid7,
+        ];
+  
+        for (let i = 0; i < claimedAssistantsCount; i++) {
+          await energyEscrow.addRecipient(
+            depositUuid,
+            assistants[i].address,
+            recipientUuids[i]
+          );
+          await energyEscrow.setClaimable(depositUuid, recipientUuids[i]);
+          await energyEscrow
+            .connect(assistants[i])
+            .claim(depositUuid, recipientUuids[i]);
+        }
+      });
+  
+      it("Should not compensate assistants that already claimed the reward when increasing ENRG of a mission", async () => {
+        await energyEscrow.increaseEnergyAmountForOpenEnded(depositUuid, newEnrgValue);
+        const depositAfterCompensation = await energyEscrow.viewDeposit(
+          depositUuid
+        );
+        const assistants: HardhatEthersSigner[] = [
+          assistant,
+          assistant2,
+          assistant3,
+          assistant4,
+          assistant5,
+          assistant6,
+          assistant7,
+        ];
+  
+        for (const assistant of assistants) {
+          const balance = BigInt(await energyToken.balanceOf(assistant.address));
+          expect(balance).to.equal(enrgPerTask);
+        }
+
+        const expectedValue = depositAmount - (BigInt(enrgPerTask) * BigInt(claimedAssistantsCount))
+  
+        expect(BigInt(depositAfterCompensation.amount)).to.equal(expectedValue);
+        expect(BigInt(depositAfterCompensation.refundableAmount)).to.equal(
+          expectedValue
+        );
       });
 
-      it("Should refund the owner upon reducing the max assignment", async () => {});
-
-      it("Should allow the owner to add the max assignment", async () => {});
-
-      it("Should automatically compensate assistants that already claimed their reward when adding the max assignment", async () => {});
-
-      it("Should allow owner to adjust the energy", async () => {});
-
-      it("Should allow owner to adjust the energy", async () => {});
-
-      it("Should allow owner to adjust the energy", async () => {});
+      it("Admins should be able to add more energies to the deposit", async()=>{
+        const amountToDeposit = 1000000
+        await energyToken.connect(owner).mint(admin.address, 1000000);
+        const remainingBefore = await energyEscrow.calculateRemainingClaims(depositUuid);
+        expect(remainingBefore.claimsRemaining).to.equal(93)
+        expect(remainingBefore.acceptancesRemaining).to.equal(93)
+        await energyToken.connect(admin).approve(await energyEscrow.getAddress(), amountToDeposit);
+        await energyEscrow.connect(admin).depositForOpenEnded(depositUuid, amountToDeposit);
+        const remainingAfter = await energyEscrow.calculateRemainingClaims(depositUuid);
+        expect(remainingAfter.claimsRemaining).to.equal(1093)
+        expect(remainingAfter.acceptancesRemaining).to.equal(1093)
+      })
     });
+  
 
-    //Task Edit START
-
-    //Task Edit END
   });
 
-  // describe("Missions", async () => {
-  //   let owner:HardhatEthersSigner,
-  //   admin:HardhatEthersSigner,
-  //   assistant:HardhatEthersSigner,
-  //   assistant2:HardhatEthersSigner,
-  //   assistant3:HardhatEthersSigner,
-  //   assistant4:HardhatEthersSigner,
-  //   assistant5:HardhatEthersSigner,
-  //   assistant6:HardhatEthersSigner,
-  //   assistant7:HardhatEthersSigner,
-  //   assistant8:HardhatEthersSigner,
-  //   assistant9:HardhatEthersSigner,
-  //   assistant10:HardhatEthersSigner,
-  //   assistant11:HardhatEthersSigner,
-  //   assistant12:HardhatEthersSigner,
-  //   assistant13:HardhatEthersSigner,
-  //   assistant14:HardhatEthersSigner,
-  //   assistant15:HardhatEthersSigner,
-  //   assistant16:HardhatEthersSigner,
-  //   assistant17:HardhatEthersSigner;
-
-
-  //   let recipientUuid1: string,
-  //     recipientUuid2: string,
-  //     recipientUuid3: string,
-  //     recipientUuid4: string,
-  //     recipientUuid5: string,
-  //     recipientUuid6: string,
-  //     recipientUuid7: string,
-  //     recipientUuid8: string,
-  //     recipientUuid9: string,
-  //     recipientUuid10: string,
-  //     recipientUuid11: string,
-  //     recipientUuid12: string,
-  //     recipientUuid13: string,
-  //     recipientUuid14: string,
-  //     recipientUuid15: string,
-  //     recipientUuid16: string,
-  //     recipientUuid17: string;
-
-      
-  //   let depositAmount:bigint;
-  //   let enrgPerTask: bigint;
-  //   let depositUuid:string;
-  //   // Common setup for the deposit tests
-  //   beforeEach(async () => {
-  //     ({
-  //       owner,
-  //       admin,
-  //       assistant,
-  //       assistant2,
-  //       assistant3,
-  //       assistant4,
-  //       assistant5,
-  //       assistant6,
-  //       assistant7,
-  //       assistant8,
-  //       assistant9,
-  //       assistant10,
-  //       assistant11,
-  //       assistant12,
-  //       assistant13,
-  //       assistant14,
-  //       assistant15,
-  //       assistant16,
-  //       assistant17,
-  //     } = await loadFixture(deployFixtureBulk));
-  //     enrgPerTask = BigInt(1000);
-  //     depositAmount = BigInt(100000); // 1000 ENRG tokens
-  //     depositUuid = generateUUID(await admin.getAddress());
-
-  //     recipientUuid1 = generateUUID(assistant.address);
-  //     recipientUuid2 = generateUUID(assistant2.address);
-  //     recipientUuid3 = generateUUID(assistant3.address);
-  //     recipientUuid4 = generateUUID(assistant4.address);
-  //     recipientUuid5 = generateUUID(assistant5.address);
-  //     recipientUuid6 = generateUUID(assistant6.address);
-  //     recipientUuid7 = generateUUID(assistant7.address);
-  //     recipientUuid8 = generateUUID(assistant8.address);
-  //     recipientUuid9 = generateUUID(assistant9.address);
-  //     recipientUuid10 = generateUUID(assistant10.address);
-  //     recipientUuid11 = generateUUID(assistant11.address);
-  //     recipientUuid12 = generateUUID(assistant12.address);
-  //     recipientUuid13 = generateUUID(assistant13.address);
-  //     recipientUuid14 = generateUUID(assistant14.address);
-  //     recipientUuid15 = generateUUID(assistant15.address);
-  //     recipientUuid16 = generateUUID(assistant16.address);
-  //     recipientUuid17 = generateUUID(assistant17.address);
-
-  //     await energyToken
-  //       .connect(admin)
-  //       .approve(await energyEscrow.getAddress(), depositAmount);
-  //     await energyEscrow.connect(admin).deposit(depositUuid, depositAmount);
-  //     await energyEscrow
-  //     .connect(owner)
-  //     .setIsOpenEnded(depositUuid ,true);
-  //     await energyEscrow
-  //       .connect(owner)
-  //       .setAmounts(depositUuid, enrgPerTask, depositAmount, 0);
-        
-  //   });
-
-  //   it("Should allow setting refundable, claimable amounts", async () => {
-  //     const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     expect(deposit.claimableAmount).to.equal(enrgPerTask);
-  //     expect(deposit.refundableAmount).to.equal(depositAmount);
-  //   });
-
-  //   it("Should allow setting the isOpenEnded flag", async () => {
-  //     const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     expect(deposit.isOpenEnded).to.equal(true);
-  //   });
-
-  //   it("Should allow setting the refund flag", async () => {
-  //     let deposit;
-  //     await energyEscrow.connect(owner).setAllowRefund(depositUuid, false);
-  //     deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     expect(deposit.allowRefund).to.be.false;
-
-  //     await energyEscrow.connect(owner).setAllowRefund(depositUuid, true);
-  //     deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     expect(deposit.allowRefund).to.be.false;
-  //   });
-
-  //   // it("Should disallow the owner to refund the ENRG if the task was already accepted before", async () => {});
-
-  //   it("Should allow setting the claimable/claimed flag toggle", async () => {
-  //     await energyEscrow.addRecipient(
-  //       depositUuid,
-  //       assistant.address,
-  //       recipientUuid1
-  //     );
-  //     await energyEscrow.setClaimable(depositUuid, recipientUuid1);
-
-  //     await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1);
-  //     const depositRecipient = await energyEscrow.viewDepositRecipient(
-  //       depositUuid,
-  //       recipientUuid1
-  //     );
-  //     expect(depositRecipient[1]).to.be.equal(true);
-  //     expect(depositRecipient[2]).to.be.equal(true);
-  //   });
-
-  //   describe("Adding Recipients", async () => {
-  //     // it("Should disallow adding recipients when at max capacity", async () => {
-  //     //   await energyEscrow.setIsOpenEnded(depositUuid, true);
-
-  //     //   await energyEscrow.addRecipient(
-  //     //     depositUuid,
-  //     //     assistant.address,
-  //     //     recipientUuid1
-  //     //   );
-  //     //   await energyEscrow.addRecipient(
-  //     //     depositUuid,
-  //     //     assistant2.address,
-  //     //     recipientUuid2
-  //     //   );
-  //     //   await energyEscrow.addRecipient(
-  //     //     depositUuid,
-  //     //     assistant3.address,
-  //     //     recipientUuid3
-  //     //   );
-  //     //   await energyEscrow.addRecipient(
-  //     //     depositUuid,
-  //     //     assistant4.address,
-  //     //     recipientUuid4
-  //     //   );
-
-  //     //   await expect(
-  //     //     energyEscrow.addRecipient(
-  //     //       depositUuid,
-  //     //       assistant5.address,
-  //     //       recipientUuid5
-  //     //     )
-  //     //   ).to.be.revertedWith(
-  //     //     "EnergyEscrow::addRecipient: Recipients cannot exceed the assistant count"
-  //     //   );
-
-  //     //   const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //     // });
-  //     it("Should allow adding multiple recipients", async () => {
-        
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant2.address,
-  //         recipientUuid2
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant3.address,
-  //         recipientUuid3
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant4.address,
-  //         recipientUuid4
-  //       );
-
-  //       const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(deposit.recipientCount).to.be.equal();
-  //     });
-  //   });
-
-  //   describe("Removing Recipients", async () => {
-  //     it("Should allow removing a recipient", async () => {
-  //       const recipientsToBeAdded = 17;
-
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant2.address,
-  //         recipientUuid2
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant3.address,
-  //         recipientUuid3
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant4.address,
-  //         recipientUuid4
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant5.address,
-  //         recipientUuid5
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant6.address,
-  //         recipientUuid6
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant7.address,
-  //         recipientUuid7
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant8.address,
-  //         recipientUuid8
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant9.address,
-  //         recipientUuid9
-  //       );
-
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant10.address,
-  //         recipientUuid10
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant11.address,
-  //         recipientUuid11
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant12.address,
-  //         recipientUuid12
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant13.address,
-  //         recipientUuid13
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant14.address,
-  //         recipientUuid14
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant15.address,
-  //         recipientUuid15
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant16.address,
-  //         recipientUuid16
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant17.address,
-  //         recipientUuid17
-  //       );
-        
-  //       const depositBef = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(depositBef.recipientCount).to.be.equal(recipientsToBeAdded);
-
-  //       const removeRecipientTx = await energyEscrow.removeRecipient(
-  //         depositUuid,
-  //         recipientUuid4
-  //       );
-  //       const removeRecipientReciept = await removeRecipientTx.wait();
-  //       console.log("🚀 ~ it ~ removeRecipientReciept:", removeRecipientReciept?.gasUsed)
-        
-
-  //       const depositAft = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(depositAft.recipientCount).to.be.equal(recipientsToBeAdded-1);
-  //     });
-
-  //     it("Should disallow removing a recipient that has a claimable flag set as true and claimed flag set as false", async () => {
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant2.address,
-  //         recipientUuid2
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant3.address,
-  //         recipientUuid3
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant4.address,
-  //         recipientUuid4
-  //       );
-
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid4);
-  //       await expect(
-  //         energyEscrow.removeRecipient(depositUuid, recipientUuid4)
-  //       ).to.be.revertedWith(
-  //         "EnergyEscrow::removeRecipient: Unable to remove recipient due to recipient state being set to claimable"
-  //       );
-
-  //       const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(deposit.recipientCount).to.be.equal(deposit.recipientCount);
-  //     });
-  //   });
-
-  //   describe("Claiming", async () => {
-  //     it("Should allow one assistant to claim the amount", async () => {
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid1);
-  //       const depositBef = await energyEscrow.viewDeposit(depositUuid);
-  //       await energyEscrow
-  //         .connect(assistant)
-  //         .claim(depositUuid, recipientUuid1);
-  //       const depositAft = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
-  //       expect(depositAft[1]).to.be.equal(depositBef[1] - enrgPerTask);
-  //       expect(depositAft[1]).to.be.equal(depositAft[3]);
-  //     });
-
-  //     it("Should allow all assistants to claim the amount", async () => {
-  //       //Adding recipients
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant2.address,
-  //         recipientUuid2
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant3.address,
-  //         recipientUuid3
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant4.address,
-  //         recipientUuid4
-  //       );
-
-  //       //Setting the recipient entry to claimable state
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid1);
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid2);
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid3);
-  //       await energyEscrow.setClaimable(depositUuid, recipientUuid4);
-
-  //       // Simulate assistant claiming
-  //       await energyEscrow
-  //         .connect(assistant)
-  //         .claim(depositUuid, recipientUuid1);
-  //       await energyEscrow
-  //         .connect(assistant2)
-  //         .claim(depositUuid, recipientUuid2);
-  //       await energyEscrow
-  //         .connect(assistant3)
-  //         .claim(depositUuid, recipientUuid3);
-  //       await energyEscrow
-  //         .connect(assistant4)
-  //         .claim(depositUuid, recipientUuid4);
-
-  //       //Checking assistant balance
-  //       expect(await energyToken.balanceOf(assistant)).to.be.equal(enrgPerTask);
-  //       expect(await energyToken.balanceOf(assistant2)).to.be.equal(
-  //         enrgPerTask
-  //       );
-  //       expect(await energyToken.balanceOf(assistant3)).to.be.equal(
-  //         enrgPerTask
-  //       );
-  //       expect(await energyToken.balanceOf(assistant4)).to.be.equal(
-  //         enrgPerTask
-  //       );
-
-  //       //Check contract deposit
-  //       const deposit = await energyEscrow.viewDeposit(depositUuid);
-  //       expect(deposit[1]).to.be.equal(BigInt(0));
-  //       expect(deposit[3]).to.be.equal(BigInt(0));
-  //     });
-  //   });
-
-  //   describe("Deposit Deletion", async () => {});
-
-  //   describe("Refunds", async () => {
-  //     it("Should allow the contract owner to refund a deposit without any recipients", async () => {
-  //       await energyEscrow.refund(depositUuid);
-  //       const deposit = await energyEscrow.viewDeposit(depositUuid);
-
-  //       expect(deposit[1]).to.be.equal(0); //Amount
-  //       expect(deposit[2]).to.be.equal(0); //Claimable
-  //       expect(deposit[3]).to.be.equal(0); //Refundable
-  //       expect(deposit[5]).to.be.equal(0); //Recipient Length (number of recipients)
-  //     });
-
-  //     it("Should disallow the owner to refund a deposit when there's a recipient already", async () => {
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant.address,
-  //         recipientUuid1
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant2.address,
-  //         recipientUuid2
-  //       );
-  //       await energyEscrow.addRecipient(
-  //         depositUuid,
-  //         assistant3.address,
-  //         recipientUuid3
-  //       );
-
-  //       await expect(
-  //         energyEscrow.connect(taskOwner).refund(depositUuid)
-  //       ).revertedWith(
-  //         "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
-  //       );
-  //     });
-
-  //     // it("Should disallow the contract owner to refund when it was accepted previously", async () => {
-  //     //   await energyEscrow.addRecipient(
-  //     //     depositUuid,
-  //     //     assistant.address,
-  //     //     recipientUuid
-  //     //   );
-  //     //   await energyEscrow.setAmounts(
-  //     //     depositUuid,
-  //     //     depositAmount,
-  //     //     0,
-  //     //     assistantNumber
-  //     //   );
-  //     //   await energyEscrow.removeRecipient(depositUuid, recipientUuid);
-
-  //     //   await expect(
-  //     //     energyEscrow.connect(taskOwner).refund(depositUuid)
-  //     //   ).revertedWith(
-  //     //     "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant"
-  //     //   );
-  //     // });
-
-  //     //TODO: Implement test case for forced refunds.
-  //   });
-
-  //   describe("Task Edit", async () => {
-  //     it("Should allow owner to reduce the max assignment", async () => {
-  //       const deposit = energyEscrow.viewDeposit(depositUuid);
-  //       const ownerBeforeBalance = await energyToken.balanceOf(taskOwner);
-  //     });
-
-  //     it("Should refund the owner upon reducing the max assignment", async () => {});
-
-  //     it("Should allow the owner to add the max assignment", async () => {});
-
-  //     it("Should automatically compensate assistants that already claimed their reward when adding the max assignment", async () => {});
-
-  //     it("Should allow owner to adjust the energy", async () => {});
-
-  //     it("Should allow owner to adjust the energy", async () => {});
-
-  //     it("Should allow owner to adjust the energy", async () => {});
-  //   });
-
-  //   //Task Edit START
-
-  //   //Task Edit END
-  // });
 });
+
+
