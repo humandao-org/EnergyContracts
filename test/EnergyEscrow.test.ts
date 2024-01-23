@@ -305,7 +305,7 @@ describe("EnergyEscrow", async () => {
             recipientUuid2
           )
         ).to.be.revertedWith(
-          "EnergyEscrow::addRecipient: Recipients cannot exceed the assistant count"
+          "EnergyEscrow: Max recipients reached"
         );
       });
     });
@@ -387,7 +387,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("There's still an amount left in the deposit");
+        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
       });
     });
 
@@ -432,7 +432,7 @@ describe("EnergyEscrow", async () => {
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+          "EnergyEscrow: Recipients present"
         );
       });
 
@@ -447,7 +447,7 @@ describe("EnergyEscrow", async () => {
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow::refund: Cannot refund as the task was previously accepted by an assistant"
+          "EnergyEscrow: Nothing to refund"
         );
       });
 
@@ -702,7 +702,7 @@ describe("EnergyEscrow", async () => {
             recipientUuid5
           )
         ).to.be.revertedWith(
-          "EnergyEscrow::addRecipient: Recipients cannot exceed the assistant count"
+          "EnergyEscrow: Max recipients reached"
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -794,7 +794,7 @@ describe("EnergyEscrow", async () => {
         await expect(
           energyEscrow.removeRecipient(depositUuid, recipientUuid4)
         ).to.be.revertedWith(
-          "EnergyEscrow::removeRecipient: Unable to remove recipient due to recipient state being set to claimable"
+          "EnergyEscrow: Recipient in claimable state"
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -884,7 +884,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("There's still an amount left in the deposit");
+        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
       });
     });
 
@@ -919,7 +919,7 @@ describe("EnergyEscrow", async () => {
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow::refund: There should be no recipients to be eligible for a refund"
+          "EnergyEscrow: Recipients present"
         );
       });
       describe("Force refunds", async () => {
@@ -1104,7 +1104,7 @@ describe("EnergyEscrow", async () => {
     });
   });
 
-  describe.only("Missions", async () => {
+  describe("Missions", async () => {
     let owner: HardhatEthersSigner,
       admin: HardhatEthersSigner,
       assistant: HardhatEthersSigner,
@@ -1475,7 +1475,7 @@ describe("EnergyEscrow", async () => {
         await expect(
           energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1)
         ).to.be.revertedWith(
-          "EnergyEscrow::claim: The recipient deposit state is not yet claimable"
+          "EnergyEscrow: Not claimable"
         );
       });
     });
@@ -1501,7 +1501,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("There's still an amount left in the deposit");
+        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
       });
     });
 
