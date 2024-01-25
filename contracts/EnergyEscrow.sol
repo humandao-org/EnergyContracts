@@ -604,7 +604,7 @@ contract EnergyEscrow is Ownable {
      */
     function _assistantRefund(
         Deposit storage uniqueDeposit,
-        Recipient memory recipient
+        Recipient storage recipient
     ) private {
         uint256 claimable = uniqueDeposit.assistantCount > 1 ? 
                             uniqueDeposit.claimableAmount : 

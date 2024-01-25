@@ -1030,27 +1030,31 @@ describe("EnergyEscrow", async () => {
         );
       });
 
-      it("Should allow task owner to increase the max assignment and make a deposit", async () => {
+      it.only("Should allow task owner to increase the max assignment and make a deposit", async () => {
         const newAssistantCount = 6;
         const amountToDeposit =
           (BigInt(newAssistantCount) - BigInt(assistantNumber)) *
           BigInt(enrgPerTask);
         const depositBefore = await energyEscrow.viewDeposit(depositUuid);
+        console.log("🚀 ~ it.only ~ depositBefore:", depositBefore)
         const ownerBeforeBalance =
           (await energyToken.balanceOf(taskOwner)) + depositAmount;
 
         await energyToken
           .connect(taskOwner)
           .approve(await energyEscrow.getAddress(), amountToDeposit);
-        await energyEscrow
+        const incTx = await energyEscrow
           .connect(taskOwner)
           .increaseAssistantCount(
             depositUuid,
             newAssistantCount,
             amountToDeposit
           );
+        const incRec = await incTx.wait();
+        
 
         const depositAfter = await energyEscrow.viewDeposit(depositUuid);
+        console.log("🚀 ~ it.only ~ depositAfter:", depositAfter)
         expect(await energyToken.balanceOf(taskOwner.address)).to.equal(
           ownerBeforeBalance - (depositAmount + amountToDeposit)
         );

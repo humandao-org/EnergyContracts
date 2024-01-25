@@ -214,47 +214,47 @@ contract Factory is Ownable, ReentrancyGuard {
         burningPrice = _burningPrice;
     }
 
-    /**
-     * Minting with fixed exchange rate (stablecoin)
-     * 
-     * @param _amount to be minted
-     * @param _paymentTokenAddress to be used for payment
-     */
-function mint(uint256 _amount, address _paymentTokenAddress)
-    public 
-    nonReentrant
-{
-    if(_amount < 5) revert InvalidAmount("Amount must be at least 0.05 ENRG");
-    if(_amount > maxMintAmount) revert MaxMintAmount(); // 3000 ENRG in integer terms
-    if(_amount % 5 != 0) revert InvalidAmount("Amount must be divisible by 5");
+        /**
+         * Minting with fixed exchange rate (stablecoin)
+         * 
+         * @param _amount to be minted
+         * @param _paymentTokenAddress to be used for payment
+         */
+    function mint(uint256 _amount, address _paymentTokenAddress)
+        public 
+        nonReentrant
+    {
+        if(_amount < 5) revert InvalidAmount("Amount must be at least 0.05 ENRG");
+        if(_amount > maxMintAmount) revert MaxMintAmount(); // 3000 ENRG in integer terms
+        if(_amount % 5 != 0) revert InvalidAmount("Amount must be divisible by 5");
 
-    if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
-    if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
-    
-    IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
-
-    address _to = _msgSender();
-    uint256 _price = fixedExchangeRate[_paymentTokenAddress] * _amount;
-    uint256 _priceToEnrg = (_price * 80) / 100; // 80% of _price
-    uint256 _priceToHdao = _price - _priceToEnrg; // Remaining 20%
-
+        if(_paymentTokenAddress == address(0)) revert InvalidParamsZeroAddress();
+        if(fixedExchangeRate[_paymentTokenAddress] == 0) revert InvalidParamsZeroValue();
         
-    // Check if allowance is sufficient
-    uint256 allowed = _paymentToken.allowance(_to, address(this));
-    if(allowed < _price/(10**2)) { revert("Underpaid");}
+        IERC20Metadata _paymentToken = IERC20Metadata(_paymentTokenAddress);
 
-    // Should only proceed if transfer was successful
-    _paymentToken.safeTransferFrom(_to, address(this), _price / (10**2));
+        address _to = _msgSender();
+        uint256 _price = fixedExchangeRate[_paymentTokenAddress] * _amount;
+        uint256 _priceToEnrg = (_price * 80) / 100; // 80% of _price
+        uint256 _priceToHdao = _price - _priceToEnrg; // Remaining 20%
 
-    //Swap 20% to hdao and check for success
-    _swapStablePaymentTokens(_priceToHdao /10**2, _paymentTokenAddress, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+            
+        // Check if allowance is sufficient
+        uint256 allowed = _paymentToken.allowance(_to, address(this));
+        if(allowed < _price/(10**2)) { revert("Underpaid");}
 
-    // Now mint energy
-    Energy(energyToken).mint(_to, _amount);
-    
-    //Log event to transaction
-    emit Mint(_to, _amount, _paymentTokenAddress, _price /(10 ** 2));
-}
+        // Should only proceed if transfer was successful
+        _paymentToken.safeTransferFrom(_to, address(this), _price / (10**2));
+
+        //Swap 20% to hdao and check for success
+        _swapStablePaymentTokens(_priceToHdao /10**2, _paymentTokenAddress, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+
+        // Now mint energy
+        Energy(energyToken).mint(_to, _amount);
+        
+        //Log event to transaction
+        emit Mint(_to, _amount, _paymentTokenAddress, _price /(10 ** 2));
+    }
 
 
     /**
