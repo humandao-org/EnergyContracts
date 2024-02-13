@@ -36,6 +36,7 @@ contract Factory is Ownable, ReentrancyGuard {
     address[] public fixedExchangeTokens;
     uint8 public dynamicExchangeAcceptedDeviationPercentage;
     uint256 public burningPrice; // Fixed burning price (without decimals!) to be paid in the burning
+    address public recipientAddress; //Address where we transfer the stablecoins
 
     error InvalidParams();
     error InvalidParamsLength();
@@ -57,6 +58,7 @@ contract Factory is Ownable, ReentrancyGuard {
     constructor(
         address _initialOwner, 
         address _energyToken,
+        address _recipientAddress,
         uint256 _maxMint,
         address[] memory _fixedExchangeTokens, 
         uint256[] memory _fixedExchangeRates,
@@ -74,6 +76,7 @@ contract Factory is Ownable, ReentrancyGuard {
         dynamicExchangeAcceptedDeviationPercentage = 10;
         trustedSigner = _initialOwner;
         burningPrice = 2;
+        recipientAddress = _recipientAddress;
         setStableExchangeTokens(_stableExchangeTokens, _stableExchangePools);
     }
 
@@ -247,10 +250,12 @@ contract Factory is Ownable, ReentrancyGuard {
         _paymentToken.safeTransferFrom(_to, address(this), _price / (10**2));
 
         //Swap 20% to hdao and check for success
-        _swapStablePaymentTokens(_priceToHdao /10**2, _paymentTokenAddress, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
+        // _swapStablePaymentTokens(_priceToHdao /10**2, _paymentTokenAddress, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
 
         // Now mint energy
         Energy(energyToken).mint(_to, _amount);
+        //transfer 20% to designated address
+        _paymentToken.transfer(recipientAddress, _priceToHdao /(10**2));
         
         //Log event to transaction
         emit Mint(_to, _amount, _paymentTokenAddress, _price /(10 ** 2));
@@ -297,11 +302,20 @@ contract Factory is Ownable, ReentrancyGuard {
         IERC20Metadata(_paymentTokenAddress).safeTransferFrom(_to, address(this), _price);
         Energy(energyToken).mint(_to, _amount);
 
+
         if(_paymentTokenAddress == WETH_TOKEN_ADDRESS){
-            _swapPaymentWETHToHDAOAndUSDC(_price);
+            _swapPaymentWETHtoUSDCandTransfer(_price);
         } else {
-            _swapPaymentTokenToHDAOAndUSDC(_price, _paymentTokenAddress);
+            _swapPaymentTokenToUSDCAndTransfer(_price, _paymentTokenAddress);
         }
+        // Calculate the total USDC amount from ENRG, considering 1 ENRG = 2.5 USD, and adjust for decimals.
+        uint256 usdcAmount = _amount * 25 * 10**4 / 100; // Simplify the calculation
+
+        // Calculate 20% of the USDC amount
+        uint256 twentyPercentUsdc = usdcAmount * 20 / 10;
+        
+        IERC20Metadata(USDC_TOKEN_ADDRESS).transfer(recipientAddress, twentyPercentUsdc);
+
 
         emit Mint(_to, _amount, _paymentTokenAddress, _price);
     }
@@ -415,19 +429,12 @@ contract Factory is Ownable, ReentrancyGuard {
      * @param _totalAmount of tokens to swap
      * @param _token address
      */
-    function _swapPaymentTokenToHDAOAndUSDC(uint256 _totalAmount, address _token)
+    function _swapPaymentTokenToUSDCAndTransfer(uint256 _totalAmount, address _token)
         private
     {
         if(_totalAmount == 0) revert InvalidParamsZeroValue();
-        
-        // Swap some (80%, $2 for every $2.5) $HDAO to USDC
-        uint256 _amount = _totalAmount*80/100;
 
-        if(_token != HDAO_TOKEN_ADDRESS){
-            _swapDynamicPaymentTokens(_totalAmount-_amount, _token, HDAO_TOKEN_ADDRESS, HDAOWETH_POOLID);
-        }
-
-        _swapDynamicPaymentTokens(_amount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
+        _swapDynamicPaymentTokens(_totalAmount, _token, USDC_TOKEN_ADDRESS, USDCWETH_POOLID);
     }
 
     /**
@@ -546,19 +553,18 @@ contract Factory is Ownable, ReentrancyGuard {
         );
     }
 
-        /**
-     * Swaps the totalAmount of WETH to HDAO and USDC
+    /**
+     * Swaps the totalAmount of WETH to USDC
      * 
      * @param _totalAmount of WETH to swap
      */
-    function _swapPaymentWETHToHDAOAndUSDC(uint256 _totalAmount)
+    function _swapPaymentWETHtoUSDCandTransfer(uint256 _totalAmount)
         private
     {
         if(_totalAmount == 0) revert InvalidParamsZeroValue();
 
         // Swap some (80%, $2 for every $2.5) $HDAO to USDC
         address _token = WETH_TOKEN_ADDRESS;
-        uint256 _USDCAmount = _totalAmount*80/100;
 
         IVault.FundManagement memory _funds = IVault.FundManagement({
             sender: address(this),
@@ -570,20 +576,11 @@ contract Factory is Ownable, ReentrancyGuard {
         IERC20Metadata(_token).approve(address(BalancerVault), _totalAmount);
 
         BalancerVault.swap(IVault.SingleSwap({
-            poolId: HDAOWETH_POOLID,
-            kind: IVault.SwapKind.GIVEN_IN,
-            assetIn: IAsset(_token),
-            assetOut: IAsset(HDAO_TOKEN_ADDRESS),
-            amount: _totalAmount-_USDCAmount,
-            userData: new bytes(0)
-        }), _funds, 0, type(uint256).max);
-
-        BalancerVault.swap(IVault.SingleSwap({
             poolId: USDCWETH_POOLID,
             kind: IVault.SwapKind.GIVEN_IN,
             assetIn: IAsset(_token),
             assetOut: IAsset(USDC_TOKEN_ADDRESS),
-            amount: _USDCAmount,
+            amount: _totalAmount,
             userData: new bytes(0)
         }), _funds, 0, type(uint256).max);
     }
