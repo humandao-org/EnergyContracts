@@ -18,6 +18,7 @@ const USDHT_ADDRESS = '0x753e0F7Fb8556fC274B0699417dfAbB6d6eBf38b';
 const FOXT_ADDRESS = '0x3de2E4c495C82A9BE050FB4615fA5223F88c1751'
 const HDAO_ADDRESS = '0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2';
 const ENERGY_ADDRESS = '0xfFc49340f8dbB699f0677e6Fa9f31d9ab7292Fac';
+const RECIPIENT_ADDRESS = "0x491afdEd42f1cBAc4E141f3a64aD0C10FA6C209B"
 
 const MAX_MINT_AMOUNT = BigInt("300000");
 
@@ -55,6 +56,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
     args: [
       deployer, 
       ENERGY_ADDRESS,
+      RECIPIENT_ADDRESS,
       MAX_MINT_AMOUNT,
       FIXED_EXCHANGE_RATES.map(a => a.address),
       FIXED_EXCHANGE_RATES.map(a => BigInt(a.amount)),
