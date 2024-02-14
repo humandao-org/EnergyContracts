@@ -24,7 +24,7 @@ contract Energy is ERC20, ERC20Burnable, ERC20Pausable, Ownable, ERC20Permit {
     }
 
     function decimals() public view virtual override returns (uint8) {
-        return 1;
+        return 2;
     }
 
     function setFactory(address _factory) 
