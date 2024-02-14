@@ -129,28 +129,6 @@ describe("EnergyEscrow", async () => {
     const escrow = await ethers.getContractFactory("EnergyEscrow");
     energyEscrow = await escrow.connect(owner).deploy(energyAddress);
 
-    // await network.provider.request({
-    //   method: "hardhat_impersonateAccount",
-    //   params: [CONTRACT_OWNER_ADDRESS],
-    // });
-    // await network.provider.request({
-    //   method: "hardhat_impersonateAccount",
-    //   params: [OWNER_1_ADDRESS],
-    // });
-    // await network.provider.request({
-    //   method: "hardhat_impersonateAccount",
-    //   params: [ASSISTANT_1_ADDRESS],
-    // });
-    // await network.provider.request({ method: "hardhat_impersonateAccount", params: [BINANCE_WALLET_ADDRESS]});
-    // await owner.sendTransaction({
-    //   to: OWNER_1_ADDRESS,
-    //   value: ethers.parseEther("1.0"),
-    // });
-    // await owner.sendTransaction({
-    //   to: ASSISTANT_1_ADDRESS,
-    //   value: ethers.parseEther("1.0"),
-    // });
-
     return {
       owner,
       admin,
@@ -862,6 +840,48 @@ describe("EnergyEscrow", async () => {
       expect(deposit[1]).to.be.equal(BigInt(0));
       expect(deposit[3]).to.be.equal(BigInt(0));
     });
+    describe("Social Media Validation", async()=>{
+      it("Should allow the contract owner to bulk update",async()=>{
+
+        const recipientToAddMapping = [{
+          address:assistant.address,
+          recUuid: recipientUuid1
+        },{
+          address:assistant2.address,
+          recUuid: recipientUuid2
+        },{
+          address:assistant3.address,
+          recUuid: recipientUuid3
+        },{
+          address:assistant4.address,
+          recUuid: recipientUuid4
+        }]
+
+        const promiseList = recipientToAddMapping.map(x=>{
+          return energyEscrow.addRecipient(depositUuid, x.address, x.recUuid)
+        })
+
+        await Promise.all(promiseList)
+
+        expect((await energyEscrow.viewDeposit(depositUuid)).recipientCount).to.equal(recipientToAddMapping.length)
+
+        let result = await Promise.all(recipientToAddMapping.map(x=>{
+          return energyEscrow.viewDepositRecipient(depositUuid,x.recUuid);
+        }))
+        let hasClaimable = result.some(x=>x.claimable)
+
+        //Before bulk update
+        expect(hasClaimable,"We expect that there's no recipient that is claimable").to.equal(false);
+
+        await energyEscrow.bulkSetClaimable(depositUuid, recipientToAddMapping.map(x=>x.recUuid));
+        result = await Promise.all(recipientToAddMapping.map(x=>{
+          return energyEscrow.viewDepositRecipient(depositUuid,x.recUuid);
+        }))
+        hasClaimable = result.every(x=>x.claimable)
+        expect(hasClaimable,"We expect that there's no recipient that is claimable").to.equal(true);
+
+      })
+    })
 
     describe("Deposit Deletion", async () => {
       it("Should allow the contract owner to delete a deposit", async () => {
@@ -1030,7 +1050,7 @@ describe("EnergyEscrow", async () => {
         );
       });
 
-      it.only("Should allow task owner to increase the max assignment and make a deposit", async () => {
+      it("Should allow task owner to increase the max assignment and make a deposit", async () => {
         const newAssistantCount = 6;
         const amountToDeposit =
           (BigInt(newAssistantCount) - BigInt(assistantNumber)) *

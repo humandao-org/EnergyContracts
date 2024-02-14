@@ -34,6 +34,8 @@ contract EnergyEscrow is Ownable {
     event ENRGSet(address indexed newENRGAddress);
     event AssistantAddressUpdated(bytes32 indexed uuid, bytes32 indexed recipientUuid, address indexed newAddress);
     event DepositorUpdated(bytes32 indexed uuid, address indexed oldDepositor, address indexed newDepositor);
+    event RecipientNotFound(bytes32 indexed depositUuid, bytes32 indexed recipientUuid);
+
 
     constructor(IERC20 _ENRG) Ownable(msg.sender) {
         ENRG = _ENRG;
@@ -303,6 +305,28 @@ contract EnergyEscrow is Ownable {
         deposit.recipients[index].claimable = true;
     }
 
+   /**
+     * @dev Sets multiple recipients' status to claimable for a specific deposit without reverting on missing recipients.
+     * Emits an event for each recipient UUID that is not found.
+     * @param uuid The unique identifier of the deposit.
+     * @param recUuids The unique identifiers of the recipients.
+     */
+    function bulkSetClaimable(bytes32 uuid, bytes32[] calldata recUuids) external onlyOwner {
+        Deposit storage deposit = deposits[uuid];
+
+        for (uint256 i = 0; i < recUuids.length; i++) {
+            bytes32 recUuid = recUuids[i];
+            uint256 index = recipientIndex[uuid][recUuid];
+
+            // Check if the recipient exists; if so, update its claimable status.
+            if (index < deposit.recipients.length) {
+                deposit.recipients[index].claimable = true;
+            } else {
+                // Emit an event indicating the recipient UUID was not found.
+                emit RecipientNotFound(uuid, recUuid);
+            }
+        }
+    }
 
     /**
      * @dev Allows a recipient to claim their allocated ENRG from a deposit.

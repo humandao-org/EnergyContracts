@@ -54,6 +54,7 @@ contract Factory is Ownable, ReentrancyGuard {
     event Burn(address indexed _from, uint256 _amount, address indexed _paymentToken, uint256 _price);
     event Withdrawal(uint amount, address erc20, uint when);
     event Price(uint amount, address paymentAddress, uint price);
+    event Migration(address indexed stablecoin, address indexed to, uint256 amount);
 
     constructor(
         address _initialOwner, 
@@ -357,6 +358,26 @@ contract Factory is Ownable, ReentrancyGuard {
         _withdrawToken.safeTransfer(owner(), _balance);
 
         emit Withdrawal(_balance, _erc20, block.timestamp);
+    }
+
+     /**
+     * Migrates the entire balance of each supported stablecoin to a new contract address.
+     * This function is intended to be used in the event of contract upgrades.
+     * @param _newContract The address of the new contract to transfer the stablecoin balances to.
+     */
+    function migrate(address _newContract) external onlyOwner nonReentrant {
+        require(_newContract != address(0), "Invalid address");
+
+        for (uint i = 0; i < fixedExchangeTokens.length; i++) {
+            address stablecoin = fixedExchangeTokens[i];
+            uint256 balance = IERC20(stablecoin).balanceOf(address(this));
+
+            if (balance > 0) {
+                bool success = IERC20(stablecoin).transfer(_newContract, balance);
+                require(success, "Transfer failed");
+                emit Migration(stablecoin, _newContract, balance);
+            }
+        }
     }
 
     /**
