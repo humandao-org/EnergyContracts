@@ -37,5 +37,6 @@
     "deploy:production": "cross-env NODE_ENV=production hardhat deploy --network polygon",
     "deploy:productionEnrg": "cross-env NODE_ENV=production hardhat deploy --network polygon --tags Energy",
     "deploy:productionFactory": "cross-env NODE_ENV=production hardhat deploy --network polygon --tags Factory"
+    ,"run:EnergyEscrowTests":"cross-env NODE_ENV=test hardhat test ./test/EnergyEscrow.test.ts"
   }
 }
