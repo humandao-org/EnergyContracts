@@ -17,13 +17,23 @@ import "./Energy.sol";
 contract Factory is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20Metadata;
 
-    address immutable HDAO_TOKEN_ADDRESS = 0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2;
-    address immutable USDC_TOKEN_ADDRESS = 0x23e259cFf0404d90FCDA231eDE0c350fb509bDd7;
-    address immutable WETH_TOKEN_ADDRESS = 0x303d53087ABBbe343e2360BB288275Ddba47A6b6;
-    bytes32 immutable USDCWETH_POOLID = 0x20f69a6fe6b518423c6d78845daa36770e5ed3fa000200000000000000000059;
-    bytes32 immutable HDAOWETH_POOLID = 0xc59df746f926663744ab3d10f9e71dc87a2f94e000020000000000000000005b;
-    //Sepolia
-    IBalancerQueries immutable BalancerQueries = IBalancerQueries(0x1802953277FD955f9a254B80Aa0582f193cF1d77);
+    // Sepolia
+    // address immutable HDAO_TOKEN_ADDRESS = 0x10e6f5debFd4A66A1C1dDa6Ba68CfAfcC879eab2;
+    // address immutable USDC_TOKEN_ADDRESS = 0x23e259cFf0404d90FCDA231eDE0c350fb509bDd7;
+    // address immutable WETH_TOKEN_ADDRESS = 0x303d53087ABBbe343e2360BB288275Ddba47A6b6;
+    // bytes32 immutable USDCWETH_POOLID = 0x20f69a6fe6b518423c6d78845daa36770e5ed3fa000200000000000000000059;
+    // bytes32 immutable HDAOWETH_POOLID = 0xc59df746f926663744ab3d10f9e71dc87a2f94e000020000000000000000005b;
+    // IBalancerQueries immutable BalancerQueries = IBalancerQueries(0x1802953277FD955f9a254B80Aa0582f193cF1d77);
+
+    // Polygon
+    address immutable HDAO_TOKEN_ADDRESS = 0x72928d5436Ff65e57F72D5566dCd3BaEDC649A88;
+    address immutable USDC_TOKEN_ADDRESS = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
+    address immutable WETH_TOKEN_ADDRESS = 0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619;
+    bytes32 immutable USDCWETH_POOLID = 0x03cd191f589d12b0582a99808cf19851e468e6b500010000000000000000000a;
+    bytes32 immutable HDAOWETH_POOLID = 0xb53f4e2f1e7a1b8b9d09d2f2739ac6753f5ba5cb000200000000000000000137;
+    IBalancerQueries immutable BalancerQueries = IBalancerQueries(0xE39B5e3B6D74016b2F6A9673D7d7493B6DF549d5);
+
+    
     IVault immutable BalancerVault = IVault(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
     uint256 immutable USDC_PRICE = 25 * 10**5;
 
@@ -136,6 +146,19 @@ contract Factory is Ownable, ReentrancyGuard {
             if(_fixedExchangeRates[i] == 0) revert InvalidParamsZeroValue();
             fixedExchangeRate[_fixedExchangeTokens[i]] = _fixedExchangeRates[i];
         }
+    }
+
+    /**
+     * Sets the recipientAddress (20% fee)
+     * 
+     * @param _newRecipientAddress target recipient address
+     */
+    function setRecipientAddress(address _newRecipientAddress) 
+        public 
+        onlyOwner
+    {
+        if(_newRecipientAddress == address(0)) revert InvalidParamsZeroAddress();
+        recipientAddress = _newRecipientAddress;
     }
 
     /**

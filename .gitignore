@@ -12,7 +12,9 @@
 node_modules
 
 node_modules
-.env
+.env.local
+.env.production
+.env.test
 coverage
 coverage.json
 typechain

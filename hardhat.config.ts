@@ -2,8 +2,11 @@ import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
 import { HardhatUserConfig } from "hardhat/config";
 import "hardhat-deploy";
+import { ethers } from "hardhat";
 
-dotenv.config();
+const environment = process.env.NODE_ENV;
+const envFile = environment === 'production' ? '.env.production' : environment === "test"? '.env.test': '.env.local';
+dotenv.config({ path: envFile });
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -32,6 +35,11 @@ const config: HardhatUserConfig = {
       url: 'https://polygon-mumbai.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
       chainId: 80001,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : "remote",
+    },
+    polygon: {
+      url: 'https://polygon-mainnet.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
+      chainId: 137,
+      accounts: [`0x${process.env.PRIVATE_KEY}`],
     },
     goerli: {
       url: 'https://eth-goerli.g.alchemy.com/v2/' + process.env.ALCHEMY_TOKEN,
