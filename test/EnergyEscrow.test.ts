@@ -14,7 +14,7 @@ const ASSISTANT_1_ADDRESS = "0x7491C6bCf3467973c01253F9176f56a53B680F89";
 const ASSISTANT_2_ADDRESS = "";
 
 describe("EnergyEscrow", async () => {
-  let energyEscrow: EnergyEscrow;
+  let energyEscrow:EnergyEscrow;
   let energyToken: Energy; // Replace this with the actual token type if different
   // Add other necessary variables here
 
@@ -43,6 +43,11 @@ describe("EnergyEscrow", async () => {
       assistant3,
       assistant4,
       assistant5,
+      authorized,
+      authorized2,
+      authorized3,
+      authorized4,
+      authorized5,
     ] = await ethers.getSigners();
     const mintAmount = 100000; // 1000 ENRG tokens
     // Deploying Energy Token
@@ -57,7 +62,7 @@ describe("EnergyEscrow", async () => {
 
     // Deploying Factory
     const escrow = await ethers.getContractFactory("EnergyEscrow");
-    energyEscrow = await escrow.connect(owner).deploy(energyAddress);
+    energyEscrow = await escrow.connect(owner).deploy(energyAddress, [authorized.address, authorized2.address, authorized3.address, authorized4.address, authorized5.address]);
 
     await network.provider.request({
       method: "hardhat_impersonateAccount",
@@ -89,6 +94,11 @@ describe("EnergyEscrow", async () => {
       assistant3,
       assistant4,
       assistant5,
+      authorized,
+      authorized2,
+      authorized3,
+      authorized4,
+      authorized5,
     };
   }
 
@@ -109,10 +119,11 @@ describe("EnergyEscrow", async () => {
       assistant11,
       assistant12,
       assistant13,
-      assistant14,
-      assistant15,
-      assistant16,
-      assistant17,
+      authorized,
+      authorized2,
+      authorized3,
+      authorized4,
+      authorized5,
     ] = await ethers.getSigners();
     const mintAmount = 100000; // 1000 ENRG tokens
     // Deploying Energy Token
@@ -124,10 +135,15 @@ describe("EnergyEscrow", async () => {
 
     //Owner minting for purposes
     await energyToken.mint(admin.address, mintAmount);
+    console.log(      authorized.address,
+      authorized2.address,
+      authorized3.address,
+      authorized4.address,
+      authorized5.address)
 
     // Deploying Factory
     const escrow = await ethers.getContractFactory("EnergyEscrow");
-    energyEscrow = await escrow.connect(owner).deploy(energyAddress);
+    energyEscrow = await escrow.connect(owner).deploy(energyAddress, [authorized.address, authorized2.address, authorized3.address, authorized4.address, authorized5.address]);
 
     return {
       owner,
@@ -145,10 +161,11 @@ describe("EnergyEscrow", async () => {
       assistant11,
       assistant12,
       assistant13,
-      assistant14,
-      assistant15,
-      assistant16,
-      assistant17,
+      authorized,
+      authorized2,
+      authorized3,
+      authorized4,
+      authorized5,
     };
   }
 
@@ -159,6 +176,15 @@ describe("EnergyEscrow", async () => {
     return keccak256(
       defaultAbiCoder.encode(["address", "string"], [address, formattedUuid])
     );
+  }
+
+  async function generateSignature(owner:HardhatEthersSigner, assistantAddress: string, depositUuid:string, recipientUuid:string) {
+    const messageHash = ethers.solidityPackedKeccak256(
+      ["bytes32","address", "bytes32"],
+      [depositUuid, assistantAddress, recipientUuid]
+    );
+    const signature = await owner.signMessage(ethers.getBytes(messageHash));
+    return signature;
   }
   describe("Deployment", async () => {
     it("Should set the right owner", async () => {
@@ -172,8 +198,6 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.connect(owner).transferOwnership(dummyAddress);
       expect(await energyEscrow.owner()).to.equal(dummyAddress);
     });
-
-    // Add more deployment-related tests here
   });
 
   describe("Standard Tasks", async () => {
@@ -181,19 +205,29 @@ describe("EnergyEscrow", async () => {
       taskOwner: HardhatEthersSigner,
       assistant: HardhatEthersSigner,
       assistant2: HardhatEthersSigner,
+      authorized: HardhatEthersSigner,
+      authorized2: HardhatEthersSigner,
       depositUuid: string,
-      depositAmount: any;
-    let recipientUuid: string, recipientUuid2: string;
+      depositAmount: any,
+      signature:any,
+      signature2:any, recipientUuid: string, recipientUuid2: string;
     const assistantNumber = 1;
     // Common setup for the deposit tests
     beforeEach(async () => {
-      ({ owner, taskOwner, assistant, assistant2 } = await loadFixture(
+      ({ owner, taskOwner, assistant, assistant2, authorized, authorized2 } = await loadFixture(
         deployFixture
       ));
       depositAmount = BigInt(100000); // 1000 ENRG tokens
       depositUuid = generateUUID(await taskOwner.getAddress());
       recipientUuid = generateUUID(assistant.address);
       recipientUuid2 = generateUUID(assistant2.address);
+      try {
+        signature = await generateSignature(owner, assistant.address, depositUuid, recipientUuid)
+        signature2 = await generateSignature(owner, assistant2.address, depositUuid, recipientUuid2)
+      } catch (error) {
+        console.error(error)
+      }
+
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
@@ -228,7 +262,8 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.addRecipient(
         depositUuid,
         assistant.address,
-        recipientUuid
+        recipientUuid,
+        signature
       );
 
       // Set the deposit as claimable for the assistant
@@ -254,7 +289,8 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
 
         // Retrieve the updated deposit details
@@ -271,7 +307,8 @@ describe("EnergyEscrow", async () => {
           energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid
+            recipientUuid,
+            signature
           )
         );
 
@@ -280,10 +317,11 @@ describe("EnergyEscrow", async () => {
           energyEscrow.addRecipient(
             depositUuid,
             assistant2.address,
-            recipientUuid2
+            recipientUuid2,
+            signature2
           )
         ).to.be.revertedWith(
-          "EnergyEscrow: Max recipients reached"
+          "Max recipients reached"
         );
       });
     });
@@ -294,7 +332,8 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
 
         // Set the deposit as claimable for the assistant
@@ -327,7 +366,8 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
 
         // Set the deposit as claimable for the assistant
@@ -365,7 +405,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
+        ).to.be.revertedWith("Deposit not empty");
       });
     });
 
@@ -404,13 +444,14 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
 
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow: Recipients present"
+          "Recipients present"
         );
       });
 
@@ -418,14 +459,15 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
         await energyEscrow.removeRecipient(depositUuid, recipientUuid);
 
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow: Nothing to refund"
+          "Nothing to refund"
         );
       });
 
@@ -437,7 +479,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid
+            recipientUuid,
+            signature
           );
           const depositBefore = await energyEscrow.viewDeposit(depositUuid);
           await energyEscrow.forceRefund(
@@ -461,7 +504,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid
+            recipientUuid,
+            signature
           );
           const deposit = await energyEscrow.viewDeposit(depositUuid);
           const forceRefundTx = await energyEscrow.forceRefund(
@@ -483,7 +527,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid
+            recipientUuid,
+            signature
           );
           const deposit = await energyEscrow.viewDeposit(depositUuid);
           await energyEscrow.setClaimable(depositUuid, recipientUuid);
@@ -559,7 +604,8 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid
+          recipientUuid,
+          signature
         );
         await energyEscrow.setClaimable(depositUuid, recipientUuid);
         await energyEscrow.connect(assistant).claim(depositUuid, recipientUuid);
@@ -570,6 +616,19 @@ describe("EnergyEscrow", async () => {
         ).to.equal(scaledAdditionalEnrgIncrease + viewDepositBef.amount);
       });
     });
+
+    describe("Authorized Addresses",async()=>{
+      it("It should be allowed to call the add recipient function",async()=>{
+        await energyEscrow.connect(authorized).addRecipient(depositUuid, assistant.address, recipientUuid, signature)
+        expect((await energyEscrow.viewDeposit(depositUuid)).recipientCount).to.be.equal(1)
+      })
+      it("It should be allowed to call the remove recipient function",async()=>{
+        await energyEscrow.connect(authorized).addRecipient(depositUuid, assistant.address, recipientUuid, signature)
+        expect((await energyEscrow.viewDeposit(depositUuid)).recipientCount).to.be.equal(1)
+        await energyEscrow.connect(authorized).removeRecipient(depositUuid, recipientUuid)
+        expect((await energyEscrow.viewDeposit(depositUuid)).recipientCount).to.be.equal(0)
+      })
+    })
   });
 
   describe("Multiplicity Tasks", async () => {
@@ -588,6 +647,9 @@ describe("EnergyEscrow", async () => {
       recipientUuid4: string,
       recipientUuid5: string;
     let enrgPerTask: bigint;
+    let authorized: HardhatEthersSigner, authorized2: HardhatEthersSigner, authorized3: HardhatEthersSigner
+    let signature:string, signature2:string, signature3:string, signature4:string, signature5:string
+
     const assistantNumber = 4;
     // Common setup for the deposit tests
     beforeEach(async () => {
@@ -599,6 +661,9 @@ describe("EnergyEscrow", async () => {
         assistant3,
         assistant4,
         assistant5,
+        authorized,
+        authorized2
+        ,authorized3
       } = await loadFixture(deployFixture));
       enrgPerTask = BigInt(1000);
       depositAmount = enrgPerTask * BigInt(assistantNumber); // 1000 ENRG tokens
@@ -610,6 +675,13 @@ describe("EnergyEscrow", async () => {
       recipientUuid4 = generateUUID(assistant4.address);
       recipientUuid5 = generateUUID(assistant5.address);
 
+      signature = await generateSignature(owner, assistant.address, depositUuid, recipientUuid1)
+      signature2 = await generateSignature(owner, assistant2.address, depositUuid, recipientUuid2)
+      signature3 = await generateSignature(owner, assistant3.address, depositUuid, recipientUuid3)
+      signature4 = await generateSignature(owner, assistant4.address, depositUuid, recipientUuid4)
+      signature5 = await generateSignature(owner, assistant5.address, depositUuid, recipientUuid5)
+
+      
       await energyToken
         .connect(taskOwner)
         .approve(await energyEscrow.getAddress(), depositAmount);
@@ -637,7 +709,8 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.addRecipient(
         depositUuid,
         assistant.address,
-        recipientUuid1
+        recipientUuid1,
+        signature
       );
       await energyEscrow.setClaimable(depositUuid, recipientUuid1);
 
@@ -655,32 +728,37 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
 
         await expect(
           energyEscrow.addRecipient(
             depositUuid,
             assistant5.address,
-            recipientUuid5
+            recipientUuid5,
+            signature5
           )
         ).to.be.revertedWith(
-          "EnergyEscrow: Max recipients reached"
+          "Max recipients reached"
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -690,22 +768,26 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -718,22 +800,26 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
 
         const removeRecipientTx = await energyEscrow.removeRecipient(
@@ -750,29 +836,33 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
 
         await energyEscrow.setClaimable(depositUuid, recipientUuid4);
         await expect(
           energyEscrow.removeRecipient(depositUuid, recipientUuid4)
         ).to.be.revertedWith(
-          "EnergyEscrow: Recipient in claimable state"
+          "Recipient in claimable state"
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -784,7 +874,8 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.addRecipient(
         depositUuid,
         assistant.address,
-        recipientUuid1
+        recipientUuid1,
+        signature
       );
       await energyEscrow.setClaimable(depositUuid, recipientUuid1);
       const depositBef = await energyEscrow.viewDeposit(depositUuid);
@@ -800,22 +891,26 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.addRecipient(
         depositUuid,
         assistant.address,
-        recipientUuid1
+        recipientUuid1,
+        signature
       );
       await energyEscrow.addRecipient(
         depositUuid,
         assistant2.address,
-        recipientUuid2
+        recipientUuid2,
+        signature2
       );
       await energyEscrow.addRecipient(
         depositUuid,
         assistant3.address,
-        recipientUuid3
+        recipientUuid3,
+        signature3
       );
       await energyEscrow.addRecipient(
         depositUuid,
         assistant4.address,
-        recipientUuid4
+        recipientUuid4,
+        signature4
       );
 
       //Setting the recipient entry to claimable state
@@ -845,20 +940,24 @@ describe("EnergyEscrow", async () => {
 
         const recipientToAddMapping = [{
           address:assistant.address,
-          recUuid: recipientUuid1
+          recUuid: recipientUuid1,
+          signature: signature
         },{
           address:assistant2.address,
-          recUuid: recipientUuid2
+          recUuid: recipientUuid2,
+          signature: signature2
         },{
           address:assistant3.address,
-          recUuid: recipientUuid3
+          recUuid: recipientUuid3,
+          signature: signature3
         },{
           address:assistant4.address,
-          recUuid: recipientUuid4
+          recUuid: recipientUuid4,
+          signature: signature4
         }]
 
         const promiseList = recipientToAddMapping.map(x=>{
-          return energyEscrow.addRecipient(depositUuid, x.address, x.recUuid)
+          return energyEscrow.addRecipient(depositUuid, x.address, x.recUuid, x.signature)
         })
 
         await Promise.all(promiseList)
@@ -904,7 +1003,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
+        ).to.be.revertedWith("Deposit not empty");
       });
     });
 
@@ -923,23 +1022,26 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
 
         await expect(
           energyEscrow.connect(taskOwner).refund(depositUuid)
         ).revertedWith(
-          "EnergyEscrow: Recipients present"
+          "Recipients present"
         );
       });
       describe("Force refunds", async () => {
@@ -950,7 +1052,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid1
+            recipientUuid1,
+            signature
           );
           const depositBefore = await energyEscrow.viewDeposit(depositUuid);
           await energyEscrow.forceRefund(
@@ -981,7 +1084,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid1
+            recipientUuid1,
+            signature
           );
           await energyEscrow.forceRefund(
             depositUuid,
@@ -1014,7 +1118,8 @@ describe("EnergyEscrow", async () => {
           await energyEscrow.addRecipient(
             depositUuid,
             assistant.address,
-            recipientUuid1
+            recipientUuid1,
+            signature
           );
           const deposit = await energyEscrow.viewDeposit(depositUuid);
           await energyEscrow.setClaimable(depositUuid, recipientUuid1);
@@ -1036,17 +1141,20 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
       });
 
@@ -1056,7 +1164,6 @@ describe("EnergyEscrow", async () => {
           (BigInt(newAssistantCount) - BigInt(assistantNumber)) *
           BigInt(enrgPerTask);
         const depositBefore = await energyEscrow.viewDeposit(depositUuid);
-        console.log("🚀 ~ it.only ~ depositBefore:", depositBefore)
         const ownerBeforeBalance =
           (await energyToken.balanceOf(taskOwner)) + depositAmount;
 
@@ -1074,7 +1181,6 @@ describe("EnergyEscrow", async () => {
         
 
         const depositAfter = await energyEscrow.viewDeposit(depositUuid);
-        console.log("🚀 ~ it.only ~ depositAfter:", depositAfter)
         expect(await energyToken.balanceOf(taskOwner.address)).to.equal(
           ownerBeforeBalance - (depositAmount + amountToDeposit)
         );
@@ -1167,6 +1273,9 @@ describe("EnergyEscrow", async () => {
       recipientUuid16: string,
       recipientUuid17: string;
 
+    let signature:string,signature2:string,signature3:string,signature4:string,signature5:string,signature6:string,signature7:string,signature8:string,
+    signature9:string,signature10:string,signature11:string,signature12:string,signature13:string
+
     let depositAmount: bigint;
     let enrgPerTask: bigint;
     let depositUuid: string;
@@ -1188,10 +1297,6 @@ describe("EnergyEscrow", async () => {
         assistant11,
         assistant12,
         assistant13,
-        assistant14,
-        assistant15,
-        assistant16,
-        assistant17,
       } = await loadFixture(deployFixtureBulk));
       enrgPerTask = BigInt(1000);
       depositAmount = BigInt(100000); // 1000 ENRG tokens
@@ -1210,10 +1315,20 @@ describe("EnergyEscrow", async () => {
       recipientUuid11 = generateUUID(assistant11.address);
       recipientUuid12 = generateUUID(assistant12.address);
       recipientUuid13 = generateUUID(assistant13.address);
-      recipientUuid14 = generateUUID(assistant14.address);
-      recipientUuid15 = generateUUID(assistant15.address);
-      recipientUuid16 = generateUUID(assistant16.address);
-      recipientUuid17 = generateUUID(assistant17.address);
+
+      signature = await generateSignature(owner, assistant.address, depositUuid, recipientUuid1)
+      signature2 = await generateSignature(owner, assistant2.address, depositUuid, recipientUuid2)
+      signature3 = await generateSignature(owner, assistant3.address, depositUuid, recipientUuid3)
+      signature4 = await generateSignature(owner, assistant4.address, depositUuid, recipientUuid4)
+      signature5 = await generateSignature(owner, assistant5.address, depositUuid, recipientUuid5)
+      signature6 = await generateSignature(owner, assistant6.address, depositUuid, recipientUuid6)
+      signature7 = await generateSignature(owner, assistant7.address, depositUuid, recipientUuid7)
+      signature8 = await generateSignature(owner, assistant8.address, depositUuid, recipientUuid8)
+      signature9 = await generateSignature(owner, assistant9.address, depositUuid, recipientUuid9)
+      signature10 = await generateSignature(owner, assistant10.address, depositUuid, recipientUuid10)
+      signature11 = await generateSignature(owner, assistant11.address, depositUuid, recipientUuid11)
+      signature12 = await generateSignature(owner, assistant12.address, depositUuid, recipientUuid12)
+      signature13 = await generateSignature(owner, assistant13.address, depositUuid, recipientUuid13)
 
       await energyToken
         .connect(admin)
@@ -1249,7 +1364,8 @@ describe("EnergyEscrow", async () => {
       await energyEscrow.addRecipient(
         depositUuid,
         assistant.address,
-        recipientUuid1
+        recipientUuid1,
+        signature
       );
       await energyEscrow.setClaimable(depositUuid, recipientUuid1);
 
@@ -1268,32 +1384,38 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant5.address,
-          recipientUuid5
+          recipientUuid5,
+          signature5
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant6.address,
-          recipientUuid6
+          recipientUuid6,
+          signature6
         );
 
         const deposit = await energyEscrow.viewDeposit(depositUuid);
@@ -1306,7 +1428,8 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.setClaimable(depositUuid, recipientUuid1);
         const depositBef = await energyEscrow.viewDeposit(depositUuid);
@@ -1325,67 +1448,80 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant2.address,
-          recipientUuid2
+          recipientUuid2,
+          signature2
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant3.address,
-          recipientUuid3
+          recipientUuid3,
+          signature3
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant4.address,
-          recipientUuid4
+          recipientUuid4,
+          signature4
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant5.address,
-          recipientUuid5
+          recipientUuid5,
+          signature5
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant6.address,
-          recipientUuid6
+          recipientUuid6,
+          signature6
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant7.address,
-          recipientUuid7
+          recipientUuid7,
+          signature7
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant8.address,
-          recipientUuid8
+          recipientUuid8,
+          signature8
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant9.address,
-          recipientUuid9
+          recipientUuid9,
+          signature9
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant10.address,
-          recipientUuid10
+          recipientUuid10,
+          signature10
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant11.address,
-          recipientUuid11
+          recipientUuid11,
+          signature11
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant12.address,
-          recipientUuid12
+          recipientUuid12,
+          signature12
         );
         await energyEscrow.addRecipient(
           depositUuid,
           assistant13.address,
-          recipientUuid13
+          recipientUuid13,
+          signature13
         );
 
         //Setting the recipients entries to claimable state
@@ -1402,6 +1538,7 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.setClaimable(depositUuid, recipientUuid11);
         await energyEscrow.setClaimable(depositUuid, recipientUuid12);
         await energyEscrow.setClaimable(depositUuid, recipientUuid13);
+
 
         // Simulate assistant claiming
         await energyEscrow
@@ -1494,12 +1631,13 @@ describe("EnergyEscrow", async () => {
         await energyEscrow.addRecipient(
           depositUuid,
           assistant.address,
-          recipientUuid1
+          recipientUuid1,
+          signature
         );
         await expect(
           energyEscrow.connect(assistant).claim(depositUuid, recipientUuid1)
         ).to.be.revertedWith(
-          "EnergyEscrow: Not claimable"
+          "Not claimable"
         );
       });
     });
@@ -1525,7 +1663,7 @@ describe("EnergyEscrow", async () => {
         // Attempt to delete the deposit and expect it to be reverted due to remaining balance
         await expect(
           energyEscrow.deleteDeposit(depositUuid)
-        ).to.be.revertedWith("EnergyEscrow: Deposit not empty");
+        ).to.be.revertedWith("Deposit not empty");
       });
     });
 
@@ -1541,6 +1679,159 @@ describe("EnergyEscrow", async () => {
       });
 
       //TODO: Implement test case for forced refunds.
+      it("Should allow to force refund and for the owner to reclaim all the energy regardless of its statuses", async () => {
+        const assistantCountToAdd = 13;
+        //Adding recipients
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant.address,
+          recipientUuid1,
+          signature
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant2.address,
+          recipientUuid2,
+          signature2
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant3.address,
+          recipientUuid3,
+          signature3
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant4.address,
+          recipientUuid4,
+          signature4
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant5.address,
+          recipientUuid5,
+          signature5
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant6.address,
+          recipientUuid6,
+          signature6
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant7.address,
+          recipientUuid7,
+          signature7
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant8.address,
+          recipientUuid8,
+          signature8
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant9.address,
+          recipientUuid9,
+          signature9
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant10.address,
+          recipientUuid10,
+          signature10
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant11.address,
+          recipientUuid11,
+          signature11
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant12.address,
+          recipientUuid12,
+          signature12
+        );
+        await energyEscrow.addRecipient(
+          depositUuid,
+          assistant13.address,
+          recipientUuid13,
+          signature13
+        );
+
+        //Setting the recipients entries to claimable state
+        await energyEscrow.setClaimable(depositUuid, recipientUuid1);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid2);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid3);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid4);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid5);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid6);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid7);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid8);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid9);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid10);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid11);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid12);
+        await energyEscrow.setClaimable(depositUuid, recipientUuid13);
+        
+        console.log(await energyEscrow.viewDeposit(depositUuid))
+        const ownerBeforeBalance = await energyToken.balanceOf(admin.address);
+        console.log("🚀 ~ it.only ~ ownerBeforeBalance:", ownerBeforeBalance)
+        await energyEscrow.connect(owner).forceRefund(depositUuid, recipientUuid1, admin.address)
+        const ownerAfterBalance = await energyToken.balanceOf(admin.address)
+        console.log("🚀 ~ it.only ~ ownerAfterBalance:", ownerAfterBalance)
+        console.log(await energyEscrow.viewDeposit(depositUuid))
+        expect(ownerAfterBalance).to.greaterThan(ownerBeforeBalance)
+
+
+        // Simulate assistant claiming
+        // await energyEscrow
+        //   .connect(assistant)
+        //   .claim(depositUuid, recipientUuid1);
+        // await energyEscrow
+        //   .connect(assistant2)
+        //   .claim(depositUuid, recipientUuid2);
+        // await energyEscrow
+        //   .connect(assistant3)
+        //   .claim(depositUuid, recipientUuid3);
+        // await energyEscrow
+        //   .connect(assistant4)
+        //   .claim(depositUuid, recipientUuid4);
+        // await energyEscrow
+        //   .connect(assistant5)
+        //   .claim(depositUuid, recipientUuid5);
+        // await energyEscrow
+        //   .connect(assistant6)
+        //   .claim(depositUuid, recipientUuid6);
+        // await energyEscrow
+        //   .connect(assistant7)
+        //   .claim(depositUuid, recipientUuid7);
+        // await energyEscrow
+        //   .connect(assistant8)
+        //   .claim(depositUuid, recipientUuid8);
+        // await energyEscrow
+        //   .connect(assistant9)
+        //   .claim(depositUuid, recipientUuid9);
+        // await energyEscrow
+        //   .connect(assistant10)
+        //   .claim(depositUuid, recipientUuid10);
+        // await energyEscrow
+        //   .connect(assistant11)
+        //   .claim(depositUuid, recipientUuid11);
+        // await energyEscrow
+        //   .connect(assistant12)
+        //   .claim(depositUuid, recipientUuid12);
+        // await energyEscrow
+        //   .connect(assistant13)
+        //   .claim(depositUuid, recipientUuid13);
+
+
+        //Check contract deposit
+        const deposit = await energyEscrow.viewDeposit(depositUuid);
+        const amountCost = enrgPerTask * BigInt(assistantCountToAdd);
+      });
     });
 
     describe("Task Edit", async () => {
@@ -1566,12 +1857,22 @@ describe("EnergyEscrow", async () => {
           recipientUuid6,
           recipientUuid7,
         ];
+        const signatures = [
+          signature,
+          signature2,
+          signature3,
+          signature4,
+          signature5,
+          signature6,
+          signature7
+        ]
 
         for (let i = 0; i < claimedAssistantsCount; i++) {
           await energyEscrow.addRecipient(
             depositUuid,
             assistants[i].address,
-            recipientUuids[i]
+            recipientUuids[i],
+            signatures[i]
           );
           await energyEscrow.setClaimable(depositUuid, recipientUuids[i]);
           await energyEscrow
